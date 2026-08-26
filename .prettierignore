@@ -1,0 +1,9 @@
+node_modules
+dist
+coverage
+.tooling
+package-lock.json
+benchmarks/results
+benchmarks/tasks/*/task.yaml
+AGENTS.md
+*.orig
