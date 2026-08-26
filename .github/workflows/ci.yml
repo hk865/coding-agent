@@ -14,10 +14,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -30,14 +30,14 @@ jobs:
 
   sandbox-e2e:
     name: M3 real bubblewrap gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -50,6 +50,7 @@ jobs:
 
       - name: Confirm user namespace support
         run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           bwrap --version
           unshare --user --map-root-user true
 
@@ -63,10 +64,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -78,7 +79,7 @@ jobs:
         run: npm run benchmark:baseline:replay -- --run-id ci-replay-${{ github.sha }}
 
       - name: Upload baseline metadata, trace, diff and evaluator logs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: m6-replay-${{ github.sha }}
           path: benchmarks/results/ci-replay-${{ github.sha }}
