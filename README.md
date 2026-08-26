@@ -54,7 +54,7 @@ M5 新增真实 CLI 子进程离线回放，覆盖
 `read → edit → shell → final` 和两次交互审批；SIGINT 场景还发现并修复了调用方取消被误记为 `failed`
 的竞态。
 
-## 当前未关闭门禁
+## 当前验收状态
 
 - M3-08 已在本地 WSL 和 GitHub Actions 的 Ubuntu 24.04 runner 通过 6/6 强制 bubblewrap
   E2E，覆盖 namespace/network、隐藏资源、timeout/cancel、孤儿进程、输出截断和完整 CLI；
