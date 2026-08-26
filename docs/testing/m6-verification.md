@@ -21,10 +21,15 @@ scope: M6 质量门禁、canary、结果协议、安全验收和剩余外部环�
 - 4 个 `internal-mvp@0.1.0` canary 均通过 base/oracle/near-miss/重复 evaluator 预检；
 - 固定 oracle replay baseline 为 4/4 resolved。它只证明 harness 与 evaluator，不是模型成绩。
 - 稳定基线已提交为 `a91cde6` 并推送到 GitHub `main`。
+- GitHub Actions 的确定性质量门禁和 replay artifact job 已有实际成功记录；最初的 sandbox
+  job 在测试前被 Ubuntu 24.04 AppArmor 的 user namespace 默认限制挡住。
+- 分支提交 `1cdbdfc` 已固定 sandbox runner 为 Ubuntu 24.04、显式开启临时 runner 的 user
+  namespace，并升级到当前官方 Actions 主版本。
 
 ## 尚未关闭
 
-- 远端 CI 尚无实际运行记录；本地强制 bwrap 门禁已关闭 M3-08 和 M6-05 的真实隔离部分；
+- 修复后的远端 bubblewrap
+  job 尚待取得成功记录；本地强制 bwrap 门禁已关闭 M3-08 和 M6-05 的真实隔离部分；
 - OpenAI 尚未进行真实网络 smoke；DeepSeek 已有纯文本 smoke，但两个 Provider 的真实无副作用 function
   ToolCall smoke 尚未完整记录；
 - 真实模型 canary baseline 尚未运行：下一次运行必须在 bubblewrap
