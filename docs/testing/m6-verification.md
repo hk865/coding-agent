@@ -24,12 +24,11 @@ scope: M6 质量门禁、canary、结果协议、安全验收和剩余外部环�
 - GitHub Actions 的确定性质量门禁和 replay artifact job 已有实际成功记录；最初的 sandbox
   job 在测试前被 Ubuntu 24.04 AppArmor 的 user namespace 默认限制挡住。
 - 分支提交 `1cdbdfc` 已固定 sandbox runner 为 Ubuntu 24.04、显式开启临时 runner 的 user
-  namespace，并升级到当前官方 Actions 主版本。
+  namespace，并升级到当前官方 Actions 主版本；修复后的
+  [run #3](https://github.com/hk865/coding-agent/actions/runs/32994978405) 三个 job 全部成功。
 
 ## 尚未关闭
 
-- 修复后的远端 bubblewrap
-  job 尚待取得成功记录；本地强制 bwrap 门禁已关闭 M3-08 和 M6-05 的真实隔离部分；
 - OpenAI 尚未进行真实网络 smoke；DeepSeek 已有纯文本 smoke，但两个 Provider 的真实无副作用 function
   ToolCall smoke 尚未完整记录；
 - 真实模型 canary baseline 尚未运行：下一次运行必须在 bubblewrap

@@ -56,8 +56,8 @@ M5 新增真实 CLI 子进程离线回放，覆盖
 
 ## 当前未关闭门禁
 
-- M3-08 已使用项目本地 bubblewrap
-  0.9 在 WSL 通过 6/6 强制 E2E，覆盖 namespace/network、隐藏资源、timeout/cancel、孤儿进程、输出截断和完整 CLI；远端 CI 定义已就绪，但尚无远端运行记录；
+- M3-08 已在本地 WSL 和 GitHub Actions 的 Ubuntu 24.04 runner 通过 6/6 强制 bubblewrap
+  E2E，覆盖 namespace/network、隐藏资源、timeout/cancel、孤儿进程、输出截断和完整 CLI；
 - OpenAI 真实 smoke 未执行；DeepSeek 已完成纯文本 smoke，但两个 Provider 的真实 function ToolCall
   smoke 尚待记录；
 - 固定 replay baseline 是 harness 自检，不是模型能力成绩；真实模型 canary baseline 尚待运行；
