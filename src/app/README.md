@@ -1,10 +1,10 @@
 # App
 
 ```yaml
-implementation: NOT_IMPLEMENTED
+implementation: IMPLEMENTED
 scope: M5
-current_stage: M4_COMPLETE
-updated: 2026-08-26
+current_stage: M6_ACCEPTANCE
+updated: 2026-08-27
 ```
 
 ## 职责与边界
@@ -16,9 +16,10 @@ Runtime 和 Reducer 决定。
 
 ## 当前状态
 
-截至 M4，src/app 及其子目录只有 README，没有进程入口、CLI 或 Composition 实现。M1–M4 的可执行组合目前由测试完成。
+已实现 CLI、strict 配置、Composition Root、新会话与恢复会话装配，以及确定性 child-process/PTY
+smoke。
 
-## M5 计划
+## 已实现
 
 - 实现最小 CLI 输入、流式输出、审批、取消与退出码。
 - 实现 Composition

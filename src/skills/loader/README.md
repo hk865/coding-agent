@@ -1,10 +1,10 @@
 # Skill Loader
 
 ```yaml
-implementation: NOT_IMPLEMENTED
+implementation: IMPLEMENTED
 scope: M5
-current_stage: M4_COMPLETE
-updated: 2026-08-26
+current_stage: M6_ACCEPTANCE
+updated: 2026-08-27
 ```
 
 ## 职责与边界
@@ -15,9 +15,9 @@ Loader 不选择 Skill、不执行内容，也不访问任意 workspace 或网�
 
 ## 当前状态
 
-截至 M4，本目录只有本 README，没有资源发现、解析或校验实现。
+已实现固定根目录加载、大小/路径/schema/重复 ID 校验、内容摘要来源和确定性排序。
 
-## M5 计划
+## 已实现
 
 - 定义最小 Skill 资源格式和版本。
 - 对路径、文件大小、编码、schema 和重复标识进行校验。

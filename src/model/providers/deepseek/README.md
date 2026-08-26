@@ -1,10 +1,10 @@
 # DeepSeek Provider
 
 ```yaml
-implementation: NOT_IMPLEMENTED
+implementation: IMPLEMENTED
 scope: M5
-current_stage: M4_COMPLETE
-updated: 2026-08-26
+current_stage: M6_ACCEPTANCE
+updated: 2026-08-27
 ```
 
 ## 职责与边界
@@ -17,9 +17,11 @@ ToolCall/usage/错误/取消转换；不负责 Runtime 重试、Tool 执行、�
 
 ## 当前状态
 
-截至 M4，本目录只有本 README；尚未发起 API 请求、安装/固定传输 SDK 或选择基线模型。
+已实现官方 endpoint 的 Chat Completions/SSE
+Adapter、ToolCall 聚合、usage、错误和取消映射。已有真实纯文本 smoke；无副作用 function ToolCall
+smoke 尚待记录。
 
-## M5 计划
+## 已实现
 
 - 使用稳定 provider ID `deepseek` 和 `DEEPSEEK_API_KEY`，只连接官方 endpoint。
 - 把 ModelRequest 与 `read`、`edit`、`shell` schema 映射为 Chat Completions messages/function

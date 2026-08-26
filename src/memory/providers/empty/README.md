@@ -1,10 +1,10 @@
 # Empty Memory Provider
 
 ```yaml
-implementation: NOT_IMPLEMENTED
+implementation: IMPLEMENTED
 scope: M5
-current_stage: M4_COMPLETE
-updated: 2026-08-26
+current_stage: M6_ACCEPTANCE
+updated: 2026-08-27
 ```
 
 ## 职责与边界
@@ -15,9 +15,10 @@ updated: 2026-08-26
 
 ## 当前状态
 
-截至 M4，本目录只有本 README，尚无 Empty Provider 实现。
+已实现确定性的无状态 Provider：recall 返回空集合，write 返回
+`provider_disabled`，两者都校验输入并响应取消。
 
-## M5 计划
+## 已实现
 
 - recall 始终返回空的 MemoryItem 集合。
 - write 执行确定性 no-op，并遵守取消和输入校验。

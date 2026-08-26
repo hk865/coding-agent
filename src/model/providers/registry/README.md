@@ -1,10 +1,10 @@
 # Model Provider Registry
 
 ```yaml
-implementation: NOT_IMPLEMENTED
+implementation: IMPLEMENTED
 scope: M5
-current_stage: M4_COMPLETE
-updated: 2026-08-26
+current_stage: M6_ACCEPTANCE
+updated: 2026-08-27
 ```
 
 ## 职责与边界
@@ -16,9 +16,9 @@ Registry 不定义第二套 ModelClient，不做自动路由、fallback、重试
 
 ## 当前状态
 
-截至 M4，本目录只有本 README，OpenAI 与 DeepSeek Adapter 均尚未实现。
+已实现 `openai` / `deepseek` 静态注册、重复/未知 ID 拒绝、能力描述、秘密变量声明和显式 factory。
 
-## M5 计划
+## 已实现
 
 - 静态注册 `openai` 与 `deepseek`，拒绝重复或未知 Provider ID。
 - 在启动期校验模型、ToolCall 能力、非敏感配置与所需秘密是否齐全。

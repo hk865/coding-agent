@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { ENGINEERING_STATUS } from "../../src/public-api.js";
 
 describe("engineering status", () => {
-  it("暴露 M5 App、Provider、工具与恢复能力", () => {
+  it("暴露 M6 验收阶段及完整 MVP 主体能力", () => {
     expect(ENGINEERING_STATUS).toEqual({
-      milestone: "M5",
+      milestone: "M6",
       agentCapabilities: true,
       contractsAvailable: true,
     });

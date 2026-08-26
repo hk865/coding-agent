@@ -1,10 +1,10 @@
 # Model Providers
 
 ```yaml
-implementation: NOT_IMPLEMENTED
+implementation: IMPLEMENTED
 scope: M5
-current_stage: M4_COMPLETE
-updated: 2026-08-26
+current_stage: M6_ACCEPTANCE
+updated: 2026-08-27
 ```
 
 ## 职责与边界
@@ -15,9 +15,10 @@ updated: 2026-08-26
 
 ## 当前状态
 
-截至 M4，本目录的 registry、openai、deepseek 子目录只有 README，没有 Provider 实现或厂商 SDK 依赖。
+Registry、OpenAI 与 DeepSeek Provider 均已实现并通过 fixture/contract 测试；真实 function ToolCall
+smoke 仍是 M6 外部门禁。
 
-## M5 计划
+## 已实现
 
 - 静态注册并完成 OpenAI 与 DeepSeek 两个 MVP Provider。
 - 为每个 Provider 建立专属协议 fixture、错误分类和取消 contract，并复用共享 ModelClientPort

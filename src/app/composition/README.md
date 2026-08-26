@@ -1,10 +1,10 @@
 # Composition
 
 ```yaml
-implementation: NOT_IMPLEMENTED
+implementation: IMPLEMENTED
 scope: M5
-current_stage: M4_COMPLETE
-updated: 2026-08-26
+current_stage: M6_ACCEPTANCE
+updated: 2026-08-27
 ```
 
 ## 职责与边界
@@ -15,9 +15,9 @@ updated: 2026-08-26
 
 ## 当前状态
 
-截至 M4，本目录只有本 README；当前装配示例仅存在于集成测试和 E2E 测试。
+已实现配置解析，以及新会话/恢复会话的生产装配和资源释放。它会显式连接 Provider、Tools、Storage、Policy、Sandbox、Skill、Memory 与 Runtime。
 
-## M5 计划
+## 已实现
 
 - 解析稳定配置，通过 Provider Registry 创建显式选择的 OpenAI/DeepSeek
   ModelClient，并创建 Stores、EventSinks、ToolRegistry、Policy 和 Sandbox。

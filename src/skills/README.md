@@ -1,10 +1,10 @@
 # Skills
 
 ```yaml
-implementation: NOT_IMPLEMENTED
+implementation: IMPLEMENTED
 scope: M5
-current_stage: M4_COMPLETE
-updated: 2026-08-26
+current_stage: M6_ACCEPTANCE
+updated: 2026-08-27
 ```
 
 ## 职责与边界
@@ -15,9 +15,9 @@ Skill 不直接执行其中描述的行为，不修改 RunState，也不能授�
 
 ## 当前状态
 
-截至 M4，src/skills 只有 README，没有 Loader、Registry 或 Provider 实现。
+固定只读资源 Loader、可冻结 Registry 和 SkillProviderPort 已实现并由 Composition 使用。
 
-## M5 计划
+## 已实现
 
 - 从固定 resources/skills 根加载最小 Skill fixture。
 - 通过 Registry 建立稳定索引和明确选择规则。

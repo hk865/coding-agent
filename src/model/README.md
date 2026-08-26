@@ -1,10 +1,10 @@
 # Model Adapters
 
 ```yaml
-implementation: NOT_IMPLEMENTED
+implementation: IMPLEMENTED
 scope: M5
-current_stage: M4_COMPLETE
-updated: 2026-08-26
+current_stage: M6_ACCEPTANCE
+updated: 2026-08-27
 ```
 
 ## 职责与边界
@@ -15,9 +15,10 @@ updated: 2026-08-26
 
 ## 当前状态
 
-截至 M4，src/model 没有 TypeScript 实现；Runtime 测试使用 FakeModelClient。
+OpenAI Responses 与 DeepSeek Chat Completions Adapter、共享协议支持和静态 Provider
+Registry 已实现；确定性测试仍使用 Fake/fixture，真实网络只做受控 smoke。
 
-## M5 计划
+## 已实现
 
 - 实现静态 Provider Registry，以及 OpenAI 与 DeepSeek 两个真实 Adapter。
 - Provider 由 App 显式选择；新增厂商不修改 Core/Runtime。

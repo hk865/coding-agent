@@ -1,10 +1,10 @@
 # CLI
 
 ```yaml
-implementation: NOT_IMPLEMENTED
+implementation: IMPLEMENTED
 scope: M5
-current_stage: M4_COMPLETE
-updated: 2026-08-26
+current_stage: M6_ACCEPTANCE
+updated: 2026-08-27
 ```
 
 ## 职责与边界
@@ -15,9 +15,9 @@ CLI 不直接构造 Core 内部状态，不决定权限，也不绕过 Compositi
 
 ## 当前状态
 
-截至 M4，本目录只有本 README，没有命令行入口或交互实现。
+已实现 `run` / `resume`、流式输出、交互/非交互审批、SIGINT 协作取消和稳定退出码。
 
-## M5 计划
+## 已实现
 
 - 支持 cwd、模型与配置选择、单轮输入和流式文本展示。
 - 展示工具开始、完成、失败和审批信息。

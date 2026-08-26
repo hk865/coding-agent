@@ -1,10 +1,10 @@
 # Memory Provider Implementations
 
 ```yaml
-implementation: PARTIAL_PLAN
+implementation: PARTIAL
 scope: M5_AND_DEFERRED
-current_stage: M4_COMPLETE
-updated: 2026-08-26
+current_stage: M6_ACCEPTANCE
+updated: 2026-08-27
 ```
 
 ## 职责与边界
@@ -15,11 +15,11 @@ updated: 2026-08-26
 
 ## 当前状态
 
-截至 M4，子目录均只有 README。empty 计划在 M5 实现；project_memory 保持 MVP 后延期。
+Empty Provider 已实现并用于生产默认装配；project_memory 保持 MVP 后延期。
 
 ## 目录状态
 
-- providers/empty：M5，NOT_IMPLEMENTED。
+- providers/empty：M5，IMPLEMENTED + TESTED。
 - providers/project_memory：POST_MVP，SKELETON + DEFERRED。
 
 ## 验收条件

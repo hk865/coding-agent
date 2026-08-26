@@ -1,10 +1,10 @@
 # Skill Registry
 
 ```yaml
-implementation: NOT_IMPLEMENTED
+implementation: IMPLEMENTED
 scope: M5
-current_stage: M4_COMPLETE
-updated: 2026-08-26
+current_stage: M6_ACCEPTANCE
+updated: 2026-08-27
 ```
 
 ## 职责与边界
@@ -15,9 +15,9 @@ Registry 不执行 Skill、不修改内容，也不根据模型自由文本动�
 
 ## 当前状态
 
-截至 M4，本目录只有本 README，没有注册、冻结或选择实现。
+已实现注册、重复检测、冻结、显式 ID 选择和稳定结果排序。
 
-## M5 计划
+## 已实现
 
 - 按稳定 ID 注册并拒绝重复项。
 - 在运行前冻结快照，避免请求处理中途变更。

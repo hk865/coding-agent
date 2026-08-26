@@ -2,7 +2,7 @@
 
 ```yaml
 status: current
-updated: 2026-08-26
+updated: 2026-08-27
 scope: 当前实现的模块职责、运行时组合、评测边界和静态依赖方向
 related_code: /home/han001/projects/agents/coding-agent/{src,benchmarks}/
 ```
@@ -68,7 +68,7 @@ flowchart TB
 | ------------------------------ | ------------------------------------------------------------ | --------------------------------------------- |
 | M1 Core 契约与测试替身         | `src/core`、`tests/fakes`                                    | VERIFIED                                      |
 | M2 Runtime 最小闭环            | `src/core/runtime`、Context、Hook                            | IMPLEMENTED + TESTED                          |
-| M3 Coding Tools 与安全边界     | `src/tools`、`src/policy`、`src/sandbox`                     | IMPLEMENTED；真实 bwrap runner 待关闭         |
+| M3 Coding Tools 与安全边界     | `src/tools`、`src/policy`、`src/sandbox`                     | VERIFIED；真实 bwrap 6/6                      |
 | M4 Session、Checkpoint 与恢复  | `src/storage`、checkpoint/recovery                           | CROSS-PROCESS TESTED                          |
 | M5 App、Provider、Skill/Memory | `src/app`、`src/model/providers`、`src/skills`、`src/memory` | IMPLEMENTED；真实 Provider smoke 部分完成     |
 | M6 Benchmark 与交付            | `benchmarks`、CI、交付文档                                   | IMPLEMENTED IN PART；真实模型 baseline 待完成 |

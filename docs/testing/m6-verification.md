@@ -2,7 +2,7 @@
 
 ```yaml
 status: external_baseline_pending
-updated: 2026-08-26
+updated: 2026-08-27
 scope: M6 质量门禁、canary、结果协议、安全验收和剩余外部环境门禁
 ```
 
@@ -20,15 +20,15 @@ scope: M6 质量门禁、canary、结果协议、安全验收和剩余外部环�
 - 实现 strict benchmark task/trial/summary schema、结果分类、trace、diff、evaluator log 和汇总；
 - 4 个 `internal-mvp@0.1.0` canary 均通过 base/oracle/near-miss/重复 evaluator 预检；
 - 固定 oracle replay baseline 为 4/4 resolved。它只证明 harness 与 evaluator，不是模型成绩。
+- 稳定基线已提交为 `a91cde6` 并推送到 GitHub `main`。
 
 ## 尚未关闭
 
 - 远端 CI 尚无实际运行记录；本地强制 bwrap 门禁已关闭 M3-08 和 M6-05 的真实隔离部分；
 - OpenAI 尚未进行真实网络 smoke；DeepSeek 已有纯文本 smoke，但两个 Provider 的真实无副作用 function
   ToolCall smoke 尚未完整记录；
-- 真实模型 canary baseline 尚未运行：必须先形成 Git commit，在 bubblewrap
-  runner 上固定 Provider、model、prompt、预算和凭据；
-- 仓库当前没有初始 commit，因此不能把现有 replay 结果当作可追溯发布候选；
+- 真实模型 canary baseline 尚未运行：下一次运行必须在 bubblewrap
+  runner 上固定 Provider、model、prompt、预算、凭据来源和 commit；
 - 大规模约 40 个任务和外部 benchmark 仍属于 MVP 后扩容。
 
 ## 结果解释

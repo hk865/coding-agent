@@ -92,9 +92,9 @@ export type {
   ToolResultPresentation,
 } from "./core/hooks/protocol/hook-protocol.js";
 
-/** M1～M4 已实现；真实 Provider、Composition 与 CLI 从 M5 开始。 */
+/** M0～M5 已实现；当前执行 M6 外部基线与发布验收。 */
 export const ENGINEERING_STATUS = Object.freeze({
-  milestone: "M5",
+  milestone: "M6",
   agentCapabilities: true,
   contractsAvailable: true,
 });

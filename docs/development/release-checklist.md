@@ -2,7 +2,7 @@
 
 候选版本只有在以下项目全部完成后才能标记为 M6 complete：
 
-- [ ] 建立可追溯 Git commit/tag，工作区无未记录生产改动；
+- [x] 建立可追溯 Git commit（`a91cde6`）并推送；发布 tag 在外部门禁关闭后创建；
 - [x] `npm run check` 全部通过；
 - [x] 支持 bubblewrap 的 Linux runner 上 `npm run test:e2e:bwrap` 通过（本地 WSL，6/6）；
 - [ ] OpenAI 与 DeepSeek 分别完成纯文本和无副作用 function ToolCall smoke；

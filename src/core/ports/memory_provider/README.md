@@ -1,10 +1,10 @@
 # Memory Provider Port
 
 ```yaml
-implementation: NOT_IMPLEMENTED
+implementation: IMPLEMENTED
 scope: M5
-current_stage: M4_COMPLETE
-updated: 2026-08-26
+current_stage: M6_ACCEPTANCE
+updated: 2026-08-27
 ```
 
 ## 职责与边界
@@ -15,9 +15,10 @@ MemoryItem 值由 core/context/types 拥有；Port 不规定数据库、向量�
 
 ## 当前状态
 
-截至 M4，本目录只有本 README，尚无 MemoryProviderPort TypeScript 契约。
+已实现受 AbortSignal 控制的 `recall` / `write` 契约、严格输入 schema、稳定错误分类和 Empty Provider
+contract。
 
-## M5 计划
+## 已实现
 
 - 定义受 AbortSignal 控制的 recall/write 输入、返回值和最小错误分类。
 - 实现 Empty Provider，作为显式无长期记忆的默认边界。

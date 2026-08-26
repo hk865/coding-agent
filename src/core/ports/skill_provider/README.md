@@ -1,10 +1,10 @@
 # Skill Provider Port
 
 ```yaml
-implementation: NOT_IMPLEMENTED
+implementation: IMPLEMENTED
 scope: M5
-current_stage: M4_COMPLETE
-updated: 2026-08-26
+current_stage: M6_ACCEPTANCE
+updated: 2026-08-27
 ```
 
 ## 职责与边界
@@ -15,9 +15,9 @@ SkillContext 值仍由 core/context/types 拥有；Port 不定义文件格式、
 
 ## 当前状态
 
-截至 M4，本目录只有本 README，尚无 SkillProviderPort TypeScript 契约。
+已实现受 AbortSignal 控制的显式选择契约、结果校验、稳定排序和错误分类。
 
-## M5 计划
+## 已实现
 
 - 定义受 AbortSignal 控制的查询/选择输入与返回值。
 - 返回已校验、带来源和稳定标识的 SkillContext。

@@ -6,4 +6,11 @@
 - [M1–M6 实际目录结构](folder-structure.md)
 - [源码模块阅读指南](source-module-guide.md)
 
+下一阶段架构提案：
+
+- [Agent Core 演进总览（先读这个）](evolution-overview.md)
+- [Coding Agent、DSH 与 Pi 的关系](dsh-pi-relationship.md)
+- [下一阶段模块图](next-module-map.md)
+- [下一阶段数据流](../data-flow/next-agent-data-flow.md)
+
 长期产品和跨版本设计仍位于 D 盘文档中心；发生冲突时以可执行代码、通过的测试和本目录当前文档为准。

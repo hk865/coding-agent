@@ -1,10 +1,10 @@
 # Memory Providers
 
 ```yaml
-implementation: NOT_IMPLEMENTED
+implementation: IMPLEMENTED
 scope: M5
-current_stage: M4_COMPLETE
-updated: 2026-08-26
+current_stage: M6_ACCEPTANCE
+updated: 2026-08-27
 ```
 
 ## 职责与边界
@@ -15,9 +15,10 @@ Memory 与 Session/Checkpoint 分离，不是运行事实来源，也不能携�
 
 ## 当前状态
 
-截至 M4，src/memory 没有 TypeScript 实现；M4 恢复只重放 Session 事实，不恢复长期 Memory。
+MemoryProviderPort 与显式 Empty Provider 已实现；长期 project
+memory 继续延期，且不参与 Session 事实恢复。
 
-## M5 计划
+## 已实现
 
 - 冻结 MemoryProviderPort 的 recall/write 窄契约。
 - 实现显式 Empty Provider 作为 MVP 默认值。

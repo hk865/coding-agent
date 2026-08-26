@@ -1,10 +1,10 @@
 # OpenAI Provider
 
 ```yaml
-implementation: NOT_IMPLEMENTED
+implementation: IMPLEMENTED
 scope: M5
-current_stage: M4_COMPLETE
-updated: 2026-08-26
+current_stage: M6_ACCEPTANCE
+updated: 2026-08-27
 ```
 
 ## 职责与边界
@@ -15,9 +15,10 @@ updated: 2026-08-26
 
 ## 当前状态
 
-截至 M4，本目录只有本 README，尚未安装 SDK、发起 API 请求或固定具体模型。
+已实现官方 SDK Responses API
+Adapter、流式文本/ToolCall/usage/错误/取消映射；真实网络 smoke 尚待授权和记录。
 
-## M5 计划
+## 已实现
 
 - 作为多 Provider 架构中的 `openai` Adapter，由 Registry/Composition 显式选择。
 - 把 ModelRequest 映射为 Responses API 输入、工具 schema 和输出上限。
