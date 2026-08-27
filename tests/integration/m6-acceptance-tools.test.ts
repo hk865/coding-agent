@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 
 // @ts-expect-error Benchmark harness 以原生 ESM JavaScript 运行，没有单独发布类型声明。
-import { currentRevision } from "../../benchmarks/harness/benchmark-harness.mjs";
+import { currentRevision, emptyMetrics } from "../../benchmarks/harness/benchmark-harness.mjs";
 // @ts-expect-error Provider smoke 是只在验收时执行的原生 ESM CLI。
 import * as providerSmoke from "../../benchmarks/harness/provider-smoke.mjs";
 // @ts-expect-error Real baseline harness 以原生 ESM JavaScript 运行。
@@ -26,6 +26,11 @@ afterEach(async () => {
 });
 
 describe("M6 acceptance tools", () => {
+  it("benchmark metrics 对墙钟回拨产生的负耗时 fail safe", () => {
+    expect(emptyMetrics(-1).wallClockMs).toBe(0);
+    expect(emptyMetrics(12.6).wallClockMs).toBe(13);
+  });
+
   it("真实 baseline 只接受干净且可追溯的 Git commit", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "m6-clean-revision-"));
     temporaryRoots.push(root);

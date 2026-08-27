@@ -11,8 +11,10 @@
   - [ ] OpenAI text + ToolCall。
 - [x] 4 个 canary 的 base/oracle/near-miss/repeat preflight 通过；
 - [x] 固定 replay baseline 生成完整 schema、trace、diff 和 evaluator log；
-- [ ] 固定真实模型 baseline 完成并保存 Provider/model/prompt/预算/commit；
-  - runner 已强制 clean commit，并支持 `CODING_AGENT_BWRAP_PATH`；当前仍缺真实凭据结果。
+- [x] 固定真实模型 baseline 完成并保存 Provider/model/prompt/预算/commit；
+  - DeepSeek `deepseek-v4-flash`、`thinking=disabled`、commit `dda8bdf`、run
+    `m6-real-deepseek-dda8bdf`：3 resolved、1
+    timeout，`resolvedAt1=0.75`，无 Agent/环境/evaluator/Policy error。
 - [x] README、architecture、interfaces、data-flow、development、testing 与当前候选代码复核一致；
 - [x] 没有未记录的 P0 安全问题或阻塞缺陷。
 

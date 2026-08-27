@@ -1,7 +1,7 @@
 # M6 验收与 Benchmark 验证记录
 
 ```yaml
-status: external_baseline_pending
+status: openai_smoke_pending
 updated: 2026-08-27
 scope: M6 质量门禁、canary、结果协议、安全验收和剩余外部环境门禁
 ```
@@ -29,6 +29,12 @@ scope: M6 质量门禁、canary、结果协议、安全验收和剩余外部环�
   337/49，函数未执行，两个场景均 passed；
 - 真实 baseline 现在拒绝 dirty worktree，并复用生产支持的绝对
   `CODING_AGENT_BWRAP_PATH`；避免把旧 commit 或缺少系统 bwrap 误记为可信成绩；
+- 真实 baseline 排障修复了三个旧架构稳定性问题：模型侧 Tool
+  schema 使用跨 Provider 保守子集且保持 object 根；DeepSeek 默认固定 `thinking=disabled`
+  并拒绝无法可靠恢复的 thinking + ToolCall；Runtime `elapsedMs` 在墙钟回拨时保持单调，sandbox
+  profile `bwrap-m3-v3` 禁止 Python 字节码缓存污染工作区；
+- benchmark 子进程耗时改用单调时钟，metrics 层仍将异常负值 fail
+  safe 为 0，避免系统校时污染严格结果 schema；
 - 稳定基线已提交为 `a91cde6` 并推送到 GitHub `main`。
 - GitHub Actions 的确定性质量门禁和 replay artifact job 已有实际成功记录；最初的 sandbox
   job 在测试前被 Ubuntu 24.04 AppArmor 的 user namespace 默认限制挡住。
@@ -36,16 +42,42 @@ scope: M6 质量门禁、canary、结果协议、安全验收和剩余外部环�
   namespace，并升级到当前官方 Actions 主版本；修复后的
   [run #3](https://github.com/hk865/coding-agent/actions/runs/32994978405) 三个 job 全部成功。
 
+## DeepSeek 真实 canary baseline
+
+正式成绩来自干净提交 `dda8bdfc18ad27b8c5a567c92dbad842c7a95555`：
+
+| 字段       | 固定值                                        |
+| ---------- | --------------------------------------------- |
+| run        | `m6-real-deepseek-dda8bdf`                    |
+| dataset    | `internal-mvp@0.1.0`，4 个合成 canary         |
+| Provider   | DeepSeek 官方 endpoint                        |
+| model      | `deepseek-v4-flash`                           |
+| options    | `thinking=disabled`                           |
+| prompt     | `m6-canary-v1`                                |
+| isolation  | `bubblewrap-required`，network disabled       |
+| 总结果     | 3 resolved、1 timeout，`resolvedAt1 = 0.75`   |
+| 非成绩错误 | agent/environment/evaluator/policy error 均 0 |
+
+| 任务                        | 结果     | model/tool requests  | input/output/cached tokens |
+| --------------------------- | -------- | -------------------- | -------------------------- |
+| `node-bearer-auth`          | resolved | 6 / 6                | 11590 / 1139 / 9856        |
+| `python-slug-normalization` | resolved | 6 / 6                | 10561 / 818 / 8960         |
+| `recovery-exactly-once`     | resolved | 5 / 5                | 8623 / 642 / 7168          |
+| `ts-nullish-timeout`        | timeout  | 子进程超时无 summary | usage 不可得               |
+
+最后一项的工作区已通过 5 项 evaluator，但 Agent 未在任务固定的 30 秒内产生终态，因此仍严格记为
+`timeout`，不改写成 resolved。前序 run `m6-real-deepseek-7faa619`、`m6-real-deepseek-973ceb3` 和
+`m6-real-deepseek-0b7024c` 含请求层/Agent/Policy 错误，只作为排障证据，不计入模型成绩。
+
 ## 尚未关闭
 
 - DeepSeek text 与无副作用 function ToolCall 已通过；当前仍没有
   `OPENAI_API_KEY`，因此 OpenAI 真实 text/ToolCall 尚未运行，双 Provider 总门禁仍不能勾选；
-- 真实模型 canary baseline 尚未运行：下一次运行必须在 bubblewrap
-  runner 上固定 Provider、model、prompt、预算、凭据来源和 commit；向 Provider 发送四个合成任务说明及代码片段前还需要用户明确授权；
 - 大规模约 40 个任务和外部 benchmark 仍属于 MVP 后扩容。
 
 ## 结果解释
 
 `resolved` 和 `unresolved`
 是任务能力结果；`agent_error`、`timeout`、`environment_error`、`evaluator_error`、`policy_violation`
-分开统计。环境和 evaluator 错误不计为模型能力失败，但会阻止版本比较。
+分开统计。`agent_error`、环境、evaluator 和 Policy 错误不计为模型能力失败，但会阻止可信版本比较；
+`timeout` 是固定任务预算内的能力结果。

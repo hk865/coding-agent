@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 
 import {
   benchmarkRunSummarySchema,
@@ -13,6 +14,10 @@ import {
 
 const MAX_CAPTURE_BYTES = 1024 * 1024;
 const ALL_STATUSES = benchmarkStatusSchema.options;
+
+function elapsedWallClockMs(started) {
+  return Math.max(0, Math.round(performance.now() - started));
+}
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -91,7 +96,7 @@ async function runCommand(command, args, options) {
   let stdoutBytes = 0;
   let stderrBytes = 0;
   let timedOut = false;
-  const started = Date.now();
+  const started = performance.now();
   return new Promise((resolve) => {
     const child = spawn(executable, args, {
       cwd: options.cwd,
@@ -130,7 +135,7 @@ async function runCommand(command, args, options) {
         launchError: error instanceof Error ? error.message : "launch failed",
         stdout: Buffer.concat(stdout).toString("utf8"),
         stderr: Buffer.concat(stderr).toString("utf8"),
-        wallClockMs: Date.now() - started,
+        wallClockMs: elapsedWallClockMs(started),
       });
     });
     child.once("close", (exitCode, signal) => {
@@ -142,7 +147,7 @@ async function runCommand(command, args, options) {
         launchError: null,
         stdout: Buffer.concat(stdout).toString("utf8"),
         stderr: Buffer.concat(stderr).toString("utf8"),
-        wallClockMs: Date.now() - started,
+        wallClockMs: elapsedWallClockMs(started),
       });
     });
   });
@@ -305,7 +310,7 @@ export function emptyMetrics(wallClockMs) {
     totalCostUsdMicros: null,
     timeToFirstActionMs: null,
     timeToFirstTestMs: null,
-    wallClockMs,
+    wallClockMs: Math.max(0, Math.round(wallClockMs)),
   };
 }
 

@@ -1,13 +1,13 @@
 # M5 验证记录
 
-更新时间：2026-08-26。
+更新时间：2026-08-27。
 
 ## 自动门禁
 
 - 格式检查：通过；
 - ESLint：通过；
 - TypeScript strict typecheck：通过；
-- 默认完整门禁：29 个文件，90 项通过、3 项按 capability 明确 skipped，共 93 项；
+- 默认完整门禁：30 个文件，98 项通过、3 项按 capability 明确 skipped，共 101 项；
 - 显式真实 bubblewrap 门禁：2 个 E2E 文件、6 项全部通过；
 - build：通过；
 - architecture check：通过（Core 未反向依赖 App/Provider）。
@@ -42,4 +42,4 @@ contract，未做真实计费请求。
 
 WSL 系统路径没有预装 bubblewrap，但已使用项目本地 bubblewrap 0.9 和可用的 unprivileged
 namespace 通过强制 M3/M5 E2E。DeepSeek 的真实无副作用 function
-ToolCall 已关闭；OpenAI 真实 text/ToolCall 仍待凭据。离线共享 contract 与完整 CLI 工具链已通过。
+ToolCall 已完成；OpenAI 真实 text/ToolCall 仍待凭据。离线共享 contract 与完整 CLI 工具链已通过。

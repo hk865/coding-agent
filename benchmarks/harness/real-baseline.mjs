@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { access, appendFile, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 
 import {
   benchmarkRunSummarySchema,
@@ -19,6 +20,10 @@ import {
 } from "./benchmark-harness.mjs";
 
 const MAX_CAPTURE_BYTES = 1024 * 1024;
+
+function elapsedWallClockMs(started) {
+  return Math.max(0, Math.round(performance.now() - started));
+}
 
 export async function resolveBubblewrapPath(environment = process.env) {
   const candidate = environment.CODING_AGENT_BWRAP_PATH ?? "/usr/bin/bwrap";
@@ -56,7 +61,7 @@ async function runAgentProcess(loaded, prepared, options) {
   let stdoutBytes = 0;
   let stderrBytes = 0;
   let timedOut = false;
-  const started = Date.now();
+  const started = performance.now();
   return new Promise((resolve) => {
     const child = spawn(process.execPath, args, {
       cwd: options.projectRoot,
@@ -95,7 +100,7 @@ async function runAgentProcess(loaded, prepared, options) {
         launchError,
         stdout: Buffer.concat(stdout).toString("utf8"),
         stderr: Buffer.concat(stderr).toString("utf8"),
-        wallClockMs: Date.now() - started,
+        wallClockMs: elapsedWallClockMs(started),
       });
     };
     child.once("error", (error) => finish(null, null, error.message));

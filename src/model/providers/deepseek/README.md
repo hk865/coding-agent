@@ -9,7 +9,7 @@ updated: 2026-08-27
 
 ## 职责与边界
 
-计划使用 DeepSeek 官方 endpoint 的 OpenAI 兼容 Chat Completions 协议，实现独立的 ModelClientPort
+使用 DeepSeek 官方 endpoint 的 OpenAI 兼容 Chat Completions 协议，实现独立的 ModelClientPort
 Adapter。
 
 本模块负责 DeepSeek 鉴权、请求映射、SSE
@@ -20,7 +20,8 @@ ToolCall/usage/错误/取消转换；不负责 Runtime 重试、Tool 执行、�
 已实现官方 endpoint 的 Chat Completions/SSE
 Adapter、ToolCall 聚合、usage、错误和取消映射。已有真实纯文本 smoke；无副作用 function
 ToolCall 也已在 M6 候选提交 `f2f8f40` 上由 `deepseek-v4-flash`
-真实通过；函数只生成固定参数，没有执行。M6 真实 canary 首跑还发现生产工具 schema 与 thinking 状态需要收紧，修复后的正式 baseline 结果另记在 M6 验证记录中。
+真实通过；函数只生成固定参数，没有执行。正式 4-canary baseline 已在提交 `dda8bdf` 上完成：3
+resolved、1 timeout，`resolvedAt1=0.75`，无 Agent/环境/evaluator/Policy error。
 
 ## 已实现
 

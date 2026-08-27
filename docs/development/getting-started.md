@@ -34,7 +34,8 @@ npm ci
 M0–M5 主体实现已完成：Agent
 Loop、read/edit/shell 安全链、Session/Checkpoint/SQLite 恢复、OpenAI/DeepSeek、CLI
 run/resume、Skill/Empty
-Memory 和外部 Tool 边界均已装配。M3 真实隔离门禁已通过；M6 正在收口真实 Provider、模型 baseline 和可追溯候选版本。
+Memory 和外部 Tool 边界均已装配。M3 真实隔离门禁已通过，DeepSeek 真实 4-canary
+baseline 已完成并如实记录 3 resolved + 1 timeout；M6 只剩 OpenAI 真实 smoke 与候选版本标记。
 
 系统没有 `/usr/bin/bwrap` 时，shell 必须 fail closed；这不是安全降级。测试或显式部署可设置绝对路径
 `CODING_AGENT_BWRAP_PATH`，再运行 `npm run test:e2e:bwrap`。当前 WSL 已用项目本地 bubblewrap
