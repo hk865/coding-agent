@@ -277,6 +277,20 @@ describe("M3-08 real bubblewrap gate", () => {
     expect(network.timedOut).toBe(false);
     expect(network.cancelled).toBe(false);
 
+    await writeFile(workspace.resolve("cache_probe.py"), "VALUE = 1\n", "utf8");
+    const python = await isolated.process.execute({
+      command: 'python3 -c "import cache_probe; print(cache_probe.VALUE)"',
+      cwd: ".",
+      timeoutMs: 5_000,
+      outputLimitBytes: 128,
+      signal: new AbortController().signal,
+    });
+    expect(python.exitCode).toBe(0);
+    expect(python.stdout.text.trim()).toBe("1");
+    await expect(access(workspace.resolve("__pycache__"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+
     const output = await isolated.process.execute({
       command: "yes x | head -c 8192",
       cwd: ".",

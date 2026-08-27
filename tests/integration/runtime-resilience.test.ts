@@ -9,6 +9,7 @@ import type {
   ModelEvent,
   ModelRequest,
 } from "../../src/core/ports/model_client/model-client-port.js";
+import type { AgentEvent } from "../../src/core/runtime/events/agent-events.js";
 import type { ToolBatchPolicy } from "../../src/core/ports/tool_batch_policy/tool-batch-policy-port.js";
 import type {
   ToolCall,
@@ -18,6 +19,7 @@ import type {
 import { RuntimeRunner } from "../../src/core/runtime/loop/runtime-runner.js";
 import type { Run } from "../../src/core/runtime/state/run-state.js";
 import { EventCollector } from "../fakes/event-collector.js";
+import { ManualClock } from "../helpers/manual-clock.js";
 
 const time = "2026-08-20T00:00:00.000Z";
 
@@ -74,6 +76,37 @@ class NeverTool implements ToolExecutorPort {
 }
 
 describe("M2 Runtime resilience matrix", () => {
+  it("墙钟回拨时 elapsedMs 保持单调，运行不会被状态机拒绝", async () => {
+    const clock = new ManualClock(Date.parse(time));
+    const events: AgentEvent[] = [];
+    const clockRewinder: EventSinkPort = {
+      sinkId: "clock-rewinder",
+      delivery: "best_effort",
+      async publish(event) {
+        events.push(structuredClone(event));
+        if (event.type === "run.started") clock.advance(100);
+        if (event.type === "model.request_started") clock.reset();
+      },
+    };
+    const model: ModelClientPort = {
+      async *stream(request) {
+        yield* finalEvents(request.requestId);
+      },
+    };
+
+    const state = await new RuntimeRunner({
+      modelClient: model,
+      toolExecutor: new NeverTool(),
+      clock,
+      eventSinks: [clockRewinder],
+    }).run(input("clock-regression"));
+
+    expect(state.status).toBe("completed");
+    expect(events.map((event) => event.meta.elapsedMs)).toEqual(
+      [...events].map((event) => event.meta.elapsedMs).sort((left, right) => left - right),
+    );
+  });
+
   it("retryable 模型错误使用新 requestId 重试，并保留 retryOf 关联", async () => {
     const requests: ModelRequest[] = [];
     const model: ModelClientPort = {

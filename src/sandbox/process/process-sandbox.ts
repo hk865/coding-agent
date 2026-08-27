@@ -107,7 +107,7 @@ function captured(chunks: readonly Buffer[], totalBytes: number, limit: number):
  * 再以只读或空挂载覆盖；能力探测失败时绝不退化成宿主 shell。
  */
 export class ProcessSandbox {
-  static readonly PROFILE_VERSION = "bwrap-m3-v2";
+  static readonly PROFILE_VERSION = "bwrap-m3-v3";
   readonly #protectedPaths: readonly string[];
 
   constructor(
@@ -312,6 +312,9 @@ export class ProcessSandbox {
       "--setenv",
       "HOME",
       "/home/agent",
+      "--setenv",
+      "PYTHONDONTWRITEBYTECODE",
+      "1",
       "--tmpfs",
       "/",
       "--dir",

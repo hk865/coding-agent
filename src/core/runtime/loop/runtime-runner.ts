@@ -316,9 +316,10 @@ export class RuntimeRunner {
     }
   }
 
-  #elapsed(context: ExecutionContext): number {
-    return (
-      context.initialElapsedMs + Math.max(0, this.#clock.now().getTime() - context.startedEpochMs)
+  #elapsed(context: ExecutionContext, floor = context.initialElapsedMs): number {
+    return Math.max(
+      floor,
+      context.initialElapsedMs + Math.max(0, this.#clock.now().getTime() - context.startedEpochMs),
     );
   }
 
@@ -338,7 +339,7 @@ export class RuntimeRunner {
         turnId: state.turn.turnId,
         sequence: state.lastEventSequence + 1,
         occurredAt: now.toISOString(),
-        elapsedMs: this.#elapsed(context),
+        elapsedMs: this.#elapsed(context, state.elapsedMs),
       },
       payload,
     });
@@ -385,7 +386,7 @@ export class RuntimeRunner {
   }
 
   async #checkStop(state: RunState, context: ExecutionContext): Promise<RunState | null> {
-    const deadline = this.#limitGuard.atElapsed(this.#elapsed(context));
+    const deadline = this.#limitGuard.atElapsed(this.#elapsed(context, state.elapsedMs));
     if (deadline) return this.#terminateForLimit(state, context, deadline);
     if (context.cancellation.signal.aborted) {
       return this.#commit(state, context, "run.cancelled", {
