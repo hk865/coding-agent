@@ -22,6 +22,11 @@ scope: M6 质量门禁、canary、结果协议、安全验收和剩余外部环�
 - 固定 oracle replay baseline 为 4/4 resolved。它只证明 harness 与 evaluator，不是模型成绩。
 - 新增可重复的真实 Provider smoke：每个 Provider 固定执行 text 与不落地的 ToolCall，strict
   summary 只保存 commit/模型/预算、事件类型、usage 和内容哈希；
+- DeepSeek 官方 endpoint 已在提交 `f2f8f4048322a0c9f92beb21164e6dd35a7c3b08` 上完成真实
+  `deepseek-v4-flash` smoke（run
+  `m6-deepseek-smoke-f2f8f40`，`thinking=disabled`）：text 为 9 个事件、input/output
+  34/7；`record_smoke_result` ToolCall 为 15 个事件、input/output
+  337/49，函数未执行，两个场景均 passed；
 - 真实 baseline 现在拒绝 dirty worktree，并复用生产支持的绝对
   `CODING_AGENT_BWRAP_PATH`；避免把旧 commit 或缺少系统 bwrap 误记为可信成绩；
 - 稳定基线已提交为 `a91cde6` 并推送到 GitHub `main`。
@@ -33,11 +38,10 @@ scope: M6 质量门禁、canary、结果协议、安全验收和剩余外部环�
 
 ## 尚未关闭
 
-- 当前环境没有 `OPENAI_API_KEY` 与
-  `DEEPSEEK_API_KEY`。Smoke 工具和脱敏证据协议已就绪，但 OpenAI 尚未真实运行，DeepSeek 仍只有旧的纯文本记录；两个 Provider 的真实无副作用 function
-  ToolCall 尚不能勾选；
+- DeepSeek text 与无副作用 function ToolCall 已通过；当前仍没有
+  `OPENAI_API_KEY`，因此 OpenAI 真实 text/ToolCall 尚未运行，双 Provider 总门禁仍不能勾选；
 - 真实模型 canary baseline 尚未运行：下一次运行必须在 bubblewrap
-  runner 上固定 Provider、model、prompt、预算、凭据来源和 commit；
+  runner 上固定 Provider、model、prompt、预算、凭据来源和 commit；向 Provider 发送四个合成任务说明及代码片段前还需要用户明确授权；
 - 大规模约 40 个任务和外部 benchmark 仍属于 MVP 后扩容。
 
 ## 结果解释

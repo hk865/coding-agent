@@ -7,6 +7,8 @@
 - [x] 支持 bubblewrap 的 Linux runner 上 `npm run test:e2e:bwrap` 通过（本地 WSL，6/6）；
 - [ ] OpenAI 与 DeepSeek 分别完成纯文本和无副作用 function ToolCall smoke；
   - acceptance 工具与脱敏 summary schema 已完成；只有真实凭据运行结果可勾选本项。
+  - [x] DeepSeek `deepseek-v4-flash` text + ToolCall，commit `f2f8f40`；
+  - [ ] OpenAI text + ToolCall。
 - [x] 4 个 canary 的 base/oracle/near-miss/repeat preflight 通过；
 - [x] 固定 replay baseline 生成完整 schema、trace、diff 和 evaluator log；
 - [ ] 固定真实模型 baseline 完成并保存 Provider/model/prompt/预算/commit；

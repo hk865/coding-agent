@@ -31,11 +31,15 @@ child-process 还覆盖非交互审批拒绝、模型等待期间 SIGINT 退出 
 - 结果：`text_delta × 3 → usage_snapshot → completed(final_answer)`；
 - usage：input 16、output 3；输出正文未记录在验证文档。
 
+M6 候选提交 `f2f8f4048322a0c9f92beb21164e6dd35a7c3b08` 又使用正式 acceptance harness 完成 text +
+`record_smoke_result`
+ToolCall：两个场景均 passed，ToolCall 只验证流与固定参数并未执行；summary 不保存正文、reasoning 或原始参数。
+
 OpenAI 本轮没有用户提供的凭据，因此只执行确定性官方 SDK/Responses fixture
 contract，未做真实计费请求。
 
 ## 环境边界
 
 WSL 系统路径没有预装 bubblewrap，但已使用项目本地 bubblewrap 0.9 和可用的 unprivileged
-namespace 通过强制 M3/M5 E2E。M5 尚未关闭的是两个 Provider 的真实无副作用 function ToolCall
-smoke；离线共享 contract 与完整 CLI 工具链已通过。
+namespace 通过强制 M3/M5 E2E。DeepSeek 的真实无副作用 function
+ToolCall 已关闭；OpenAI 真实 text/ToolCall 仍待凭据。离线共享 contract 与完整 CLI 工具链已通过。
