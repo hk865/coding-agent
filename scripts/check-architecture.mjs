@@ -24,7 +24,15 @@ const ADAPTER_CORE_ALLOWLIST = new Map([
     "tools",
     ["core/ports/tool_executor", "core/ports/tool_batch_policy", "core/ports/model_client"],
   ],
-  ["storage", ["core/ports/session_store", "core/ports/checkpoint_store", "core/ports/event_sink"]],
+  [
+    "storage",
+    [
+      "core/ports/session_store",
+      "core/ports/checkpoint_store",
+      "core/ports/inbox_store",
+      "core/ports/event_sink",
+    ],
+  ],
   ["observability", ["core/ports/event_sink"]],
   ["skills", ["core/ports/skill_provider", "core/context/types"]],
   ["memory", ["core/ports/memory_provider", "core/context/types"]],

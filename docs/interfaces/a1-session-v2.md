@@ -21,12 +21,13 @@ Session 是 Agent 的“不可擦账本”。A1 给新账本首页增加两枚�
 | ------------------------ | --------------------------------------------------------- |
 | 旧调用不传创建版本       | 创建 v1，保持源兼容                                       |
 | 新生产 Composition       | 显式创建 v2                                               |
-| SQLite database schema 1 | 自动加两个 nullable JSON 列并把数据库元数据升级到 2       |
+| SQLite database schema 1 | A1 加两个 nullable JSON 列；当前 A2 会继续升级到 schema 3 |
 | 已有 v1 Session          | 行和记录 JSON 保持 v1，校验和不变，可继续读取、追加和恢复 |
 | 新 v2 Session            | Header 与首条 `session.created` 都保存 lineage/profile    |
 | v2 Profile 不匹配        | 新 Turn 或 resume 在模型/工具执行前以 `conflict` 明确失败 |
 
-数据库版本和 Session 版本是两回事：数据库 v2 可以同时保存 Session v1 与 v2。
+数据库版本和 Session 版本是两回事：A1 的数据库 v2、当前加入 Inbox 后的数据库 v3，都可以同时保存 Session
+v1 与 v2；Session 记录不会因数据库迁移被改写。
 
 ## Lineage
 

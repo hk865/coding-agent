@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
+import { AgentDriver } from "../../agent/driver/agent-driver.js";
 import type { ApprovalRequester } from "../../policy/approval/approval-coordinator.js";
 import {
   ApprovalCoordinator,
@@ -10,8 +11,11 @@ import {
 import {
   checksum,
   type RunConfigSnapshot,
+  type SessionRecord,
+  StoreError,
 } from "../../core/ports/session_store/session-store-port.js";
 import { RuntimeRunner } from "../../core/runtime/loop/runtime-runner.js";
+import { RecoveryCoordinator } from "../../core/runtime/recovery/recovery-coordinator.js";
 import type { RunState } from "../../core/runtime/state/run-state.js";
 import type { ProviderRegistry } from "../../model/providers/registry/provider-registry.js";
 import { EmptyMemoryProvider } from "../../memory/providers/empty/empty-memory-provider.js";
@@ -43,6 +47,7 @@ export interface RunAppInput {
   readonly workspaceRoot: string;
   readonly input: string;
   readonly sessionId?: string;
+  readonly idempotencyKey?: string;
   readonly secretSource?: SecretSource;
   readonly approvalRequester?: ApprovalRequester;
   readonly providerRegistry?: ProviderRegistry;
@@ -55,6 +60,22 @@ export interface RunAppResult {
   readonly state: RunState;
   readonly enabledTools: readonly string[];
   readonly provider: string;
+  readonly inboxItemId: string;
+}
+
+async function readSessionRecords(
+  store: SqliteStores,
+  sessionId: string,
+  signal: AbortSignal,
+): Promise<readonly SessionRecord[]> {
+  const records: SessionRecord[] = [];
+  let position = 0;
+  while (true) {
+    const page = await store.read(sessionId, position, 256, { signal });
+    records.push(...page.records);
+    position = page.records.at(-1)?.position ?? position;
+    if (page.nextPosition === null) return records;
+  }
 }
 
 export async function runCodingAgent(input: Readonly<RunAppInput>): Promise<RunAppResult> {
@@ -90,23 +111,14 @@ export async function runCodingAgent(input: Readonly<RunAppInput>): Promise<RunA
       : ([] as const)),
   ]);
 
-  const runId = randomUUID();
   const sessionId = input.sessionId ?? randomUUID();
   const now = new Date().toISOString();
-  const run = {
-    schemaVersion: 1 as const,
-    runId,
-    turn: {
-      turnId: randomUUID(),
-      userMessage: {
-        schemaVersion: 1 as const,
-        messageId: randomUUID(),
-        role: "user" as const,
-        content: input.input,
-      },
-    },
-    createdAt: now,
-  };
+  if (input.idempotencyKey !== undefined && input.idempotencyKey.trim().length === 0) {
+    throw new Error("idempotencyKey 不能为空");
+  }
+  const idempotencyKey = input.idempotencyKey?.trim() ?? randomUUID();
+  const inboxIdentity = checksum({ sessionId, idempotencyKey });
+  const inboxItemId = `inbox:${inboxIdentity}`;
   const policy = new DefaultPermissionPolicy({ policyVersion: "m5-v1" });
   const baseDigest = checksum(input.config);
   const limits = {
@@ -130,15 +142,12 @@ export async function runCodingAgent(input: Readonly<RunAppInput>): Promise<RunA
 
   const store = await SqliteStores.open(path.resolve(input.config.storage.databasePath));
   try {
-    let revision: number;
     try {
       const existing = await store.get(sessionId, { signal });
-      if (existing.activeRunId) throw new Error(`Session ${sessionId} 仍有活动 Run`);
       assertSessionProfileCompatible(existing, profile);
-      revision = existing.revision;
     } catch (error: unknown) {
       if (error instanceof Error && "code" in error && error.code === "not_found") {
-        const created = await store.create(
+        await store.create(
           {
             schemaVersion: 2,
             sessionId,
@@ -149,32 +158,27 @@ export async function runCodingAgent(input: Readonly<RunAppInput>): Promise<RunA
           },
           { signal },
         );
-        revision = created.revision;
       } else throw error;
     }
-    await store.append(
-      sessionId,
-      revision,
-      [
-        {
-          recordId: `turn:${run.turn.turnId}`,
-          recordType: "turn.started",
+    const queued = await store.enqueue(
+      {
+        schemaVersion: 1,
+        itemId: inboxItemId,
+        sessionId,
+        idempotencyKey,
+        acceptedAt: now,
+        message: {
           schemaVersion: 1,
-          recordedAt: now,
-          payload: {
-            run,
-            config: snapshot,
-            workspace: {
-              identity: workspace.identity,
-              revision: await workspace.revision(),
-              reference: "workspace:current",
-            },
-          },
+          messageId: `message:${inboxIdentity}`,
+          role: "user",
+          content: input.input,
         },
-      ],
+      },
       { signal },
     );
-    const sessionSink = await SessionEventSink.connect(store, sessionId, { signal });
+    if (queued.item.status === "completed") {
+      throw new StoreError("conflict", "该幂等请求已完成，不会重复执行");
+    }
 
     const skillLoader = await FileSkillLoader.create(
       path.resolve(input.config.skills.resourceRoot),
@@ -184,53 +188,143 @@ export async function runCodingAgent(input: Readonly<RunAppInput>): Promise<RunA
       { schemaVersion: 1, requestedIds: input.config.skills.enabledIds },
       { signal },
     );
-    const memory = new EmptyMemoryProvider();
-    const memories = await memory.recall(
-      {
-        schemaVersion: 1,
-        query: input.input,
-        workspaceIdentity: workspace.identity,
-        limit: 20,
+    const driver = new AgentDriver<RunState>({
+      inbox: store,
+      driverId: `composition:${randomUUID()}`,
+      leaseMs: 300_000,
+      handler: {
+        async handle(item, handlerOptions) {
+          const runId = `inbox-run:${item.itemId}`;
+          const turnId = `inbox-turn:${item.itemId}`;
+          const newRun = {
+            schemaVersion: 1 as const,
+            runId,
+            turn: { turnId, userMessage: item.message },
+            createdAt: new Date().toISOString(),
+          };
+          const currentWorkspace = {
+            identity: workspace.identity,
+            revision: await workspace.revision(),
+            reference: "workspace:current",
+          };
+          const records = await readSessionRecords(store, sessionId, handlerOptions.signal);
+          const recordedTurn = records.find(
+            (record): record is Extract<SessionRecord, { recordType: "turn.started" }> =>
+              record.recordType === "turn.started" && record.payload.run.runId === runId,
+          );
+          const run = recordedTurn?.payload.run ?? newRun;
+          let recovered: Awaited<ReturnType<RecoveryCoordinator["recover"]>> | undefined;
+          if (recordedTurn) {
+            recovered = await new RecoveryCoordinator({
+              sessions: store,
+              checkpoints: store,
+            }).recover(sessionId, handlerOptions, {
+              config: snapshot,
+              workspace: currentWorkspace,
+            });
+            if (recovered.state.runId !== runId) {
+              throw new StoreError("conflict", "Inbox item 不是 Session 的最新 Turn");
+            }
+            if (
+              recovered.action === "terminal" ||
+              recovered.action === "side_effect_result_unknown"
+            ) {
+              return {
+                completion: { runId, turnId },
+                value: recovered.state,
+              };
+            }
+          } else {
+            const header = await store.get(sessionId, handlerOptions);
+            if (header.activeRunId) {
+              throw new StoreError("conflict", `Session ${sessionId} 仍有其他活动 Run`);
+            }
+            await store.append(
+              sessionId,
+              header.revision,
+              [
+                {
+                  recordId: `turn:${turnId}`,
+                  recordType: "turn.started",
+                  schemaVersion: 1,
+                  recordedAt: run.createdAt,
+                  payload: { run, config: snapshot, workspace: currentWorkspace },
+                },
+              ],
+              handlerOptions,
+            );
+          }
+
+          const memories = await new EmptyMemoryProvider().recall(
+            {
+              schemaVersion: 1,
+              query: item.message.content,
+              workspaceIdentity: workspace.identity,
+              limit: 20,
+            },
+            handlerOptions,
+          );
+          const dispatcher = new ToolDispatcher({
+            registry: tools,
+            permissionPolicy: policy,
+            approval: new ApprovalCoordinator(
+              input.approvalRequester ??
+                new StaticApprovalRequester({
+                  decision: "deny",
+                  reason: "interaction_unavailable",
+                }),
+            ),
+            capabilities,
+            runId,
+            workspaceIdentity: workspace.identity,
+            workspaceRevision: () => workspace.revision(),
+            sandboxProfileVersion: processProfile.version,
+          });
+          const sessionSink = await SessionEventSink.connect(store, sessionId, handlerOptions);
+          const runner = new RuntimeRunner({
+            modelClient,
+            toolExecutor: dispatcher,
+            eventSinks: [sessionSink],
+            limits,
+            toolBatchPolicy: new RegistryToolBatchPolicy(tools),
+            maxModelRetries: 0,
+            ...(input.onTextDelta ? { onTextDelta: input.onTextDelta } : {}),
+          });
+          const context = {
+            run,
+            baseSystemPrompt:
+              "You are a coding agent. Use only the provided tools and stay within the workspace.",
+            tools: tools.modelToolSpecs(),
+            skills,
+            memories,
+            tokenBudget: input.config.runtime.tokenBudget,
+            maxOutputTokens: input.config.model.maxOutputTokens,
+          };
+          const state = recovered
+            ? recovered.action === "paused"
+              ? await runner.resume(recovered.state, context, handlerOptions)
+              : await runner.continueRecovered(recovered.state, context, handlerOptions)
+            : await runner.run(context, handlerOptions);
+          return { completion: { runId, turnId }, value: state };
+        },
       },
-      { signal },
-    );
-    const approval = new ApprovalCoordinator(
-      input.approvalRequester ??
-        new StaticApprovalRequester({ decision: "deny", reason: "interaction_unavailable" }),
-    );
-    const dispatcher = new ToolDispatcher({
-      registry: tools,
-      permissionPolicy: policy,
-      approval,
-      capabilities,
-      runId,
-      workspaceIdentity: workspace.identity,
-      workspaceRevision: () => workspace.revision(),
-      sandboxProfileVersion: processProfile.version,
     });
-    const runner = new RuntimeRunner({
-      modelClient,
-      toolExecutor: dispatcher,
-      eventSinks: [sessionSink],
-      limits,
-      toolBatchPolicy: new RegistryToolBatchPolicy(tools),
-      maxModelRetries: 0,
-      ...(input.onTextDelta ? { onTextDelta: input.onTextDelta } : {}),
-    });
-    const state = await runner.run(
-      {
-        run,
-        baseSystemPrompt:
-          "You are a coding agent. Use only the provided tools and stay within the workspace.",
-        tools: tools.modelToolSpecs(),
-        skills,
-        memories,
-        tokenBudget: input.config.runtime.tokenBudget,
-        maxOutputTokens: input.config.model.maxOutputTokens,
-      },
-      { signal },
-    );
-    return { sessionId, state, enabledTools, provider: provider.id };
+
+    while (true) {
+      const processed = await driver.runNext(sessionId, { signal });
+      if (!processed) {
+        throw new StoreError("busy", "Session Inbox 当前由其他 Driver 处理");
+      }
+      if (processed.item.itemId === inboxItemId) {
+        return {
+          sessionId,
+          state: processed.value,
+          enabledTools,
+          provider: provider.id,
+          inboxItemId,
+        };
+      }
+    }
   } finally {
     await store.close();
   }

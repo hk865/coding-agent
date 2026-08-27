@@ -15,6 +15,7 @@ interface RunCommand {
   readonly input: string;
   readonly cwd: string;
   readonly sessionId?: string;
+  readonly idempotencyKey?: string;
   readonly provider?: string;
   readonly model?: string;
   readonly configPath?: string;
@@ -86,7 +87,17 @@ export function parseCliCommand(argv: readonly string[], cwd = process.cwd()): C
       options.set(name, true);
       continue;
     }
-    if (!["--input", "--cwd", "--session", "--provider", "--model", "--config"].includes(name)) {
+    if (
+      ![
+        "--input",
+        "--cwd",
+        "--session",
+        "--idempotency-key",
+        "--provider",
+        "--model",
+        "--config",
+      ].includes(name)
+    ) {
       throw new Error(`未知参数 ${name}`);
     }
     if (options.has(name)) throw new Error(`${name} 不能重复`);
@@ -107,10 +118,15 @@ export function parseCliCommand(argv: readonly string[], cwd = process.cwd()): C
       command,
       input,
       ...(options.has("--session") ? { sessionId: String(options.get("--session")) } : {}),
+      ...(options.has("--idempotency-key")
+        ? { idempotencyKey: String(options.get("--idempotency-key")) }
+        : {}),
       ...common,
     };
   }
-  if (options.has("--input")) throw new Error("resume 不接受 --input");
+  if (options.has("--input") || options.has("--idempotency-key")) {
+    throw new Error("resume 不接受 --input 或 --idempotency-key");
+  }
   const sessionId = options.get("--session");
   if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
     throw new Error("resume 需要 --session");
@@ -165,6 +181,7 @@ export async function runCli(
             ...execution,
             input: command.input,
             ...(command.sessionId ? { sessionId: command.sessionId } : {}),
+            ...(command.idempotencyKey ? { idempotencyKey: command.idempotencyKey } : {}),
           })
         : await resumeCodingAgent({
             ...execution,

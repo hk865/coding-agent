@@ -104,6 +104,7 @@ export {
   ContextSelectionError,
   selectContext,
 } from "./core/context/selection_policy/context-selection-policy.js";
+export { AgentDriver, AgentDriverBusyError } from "./agent/driver/agent-driver.js";
 export { HookExecutor, HookExecutionError } from "./core/hooks/executor/hook-executor.js";
 export { HookRegistry } from "./core/hooks/registry/hook-registry.js";
 export { CancellationController } from "./core/runtime/cancellation/cancellation-controller.js";
@@ -127,6 +128,17 @@ export {
   checkpointSchema,
   createCheckpoint,
 } from "./core/ports/checkpoint_store/checkpoint-store-port.js";
+export {
+  claimInboxInputSchema,
+  completeInboxInputSchema,
+  enqueueInboxInputSchema,
+  inboxClaimSchema,
+  inboxCompletionSchema,
+  inboxFailureSchema,
+  inboxItemSchema,
+  renewInboxClaimInputSchema,
+  releaseInboxInputSchema,
+} from "./core/ports/inbox_store/inbox-store-port.js";
 export {
   agentProfileIdentitySchema,
   createSessionInputSchema,
@@ -170,6 +182,26 @@ export type {
   CheckpointCandidate,
   CheckpointStorePort,
 } from "./core/ports/checkpoint_store/checkpoint-store-port.js";
+export type {
+  ClaimInboxInput,
+  CompleteInboxInput,
+  EnqueueInboxInput,
+  EnqueueInboxResult,
+  InboxClaim,
+  InboxCompletion,
+  InboxFailure,
+  InboxItem,
+  InboxListPage,
+  InboxStorePort,
+  RenewInboxClaimInput,
+  ReleaseInboxInput,
+} from "./core/ports/inbox_store/inbox-store-port.js";
+export type {
+  AgentDriverHandler,
+  AgentDriverHandlerResult,
+  AgentDriverOptions,
+  AgentDriverRunResult,
+} from "./agent/driver/agent-driver.js";
 export type {
   AgentProfileIdentity,
   CreateSessionInput,

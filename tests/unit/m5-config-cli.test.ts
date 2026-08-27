@@ -18,13 +18,17 @@ describe("M5 config/CLI", () => {
   });
 
   it("run/resume 严格拒绝缺失与冲突参数", () => {
-    expect(parseCliCommand(["run", "--input", "hello", "--non-interactive"], "/tmp")).toMatchObject(
-      {
-        command: "run",
-        input: "hello",
-        nonInteractive: true,
-      },
-    );
+    expect(
+      parseCliCommand(
+        ["run", "--input", "hello", "--idempotency-key", "request-1", "--non-interactive"],
+        "/tmp",
+      ),
+    ).toMatchObject({
+      command: "run",
+      input: "hello",
+      idempotencyKey: "request-1",
+      nonInteractive: true,
+    });
     expect(parseCliCommand(["resume", "--session", "s-1"], "/tmp")).toMatchObject({
       command: "resume",
       sessionId: "s-1",
@@ -33,6 +37,9 @@ describe("M5 config/CLI", () => {
     expect(() => parseCliCommand(["resume", "--session", "s-1", "--input", "x"], "/tmp")).toThrow(
       "不接受",
     );
+    expect(() =>
+      parseCliCommand(["resume", "--session", "s-1", "--idempotency-key", "x"], "/tmp"),
+    ).toThrow("不接受");
     expect(() => parseCliCommand(["run", "--input", "x", "--unknown"], "/tmp")).toThrow("未知参数");
   });
 });

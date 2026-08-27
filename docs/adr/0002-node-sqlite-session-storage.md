@@ -3,6 +3,7 @@
 ```yaml
 status: accepted
 date: 2026-08-22
+amended: 2026-08-27
 scope: M4 Session/Checkpoint 持久化驱动、最低 Node 版本和事务边界
 ```
 
@@ -17,11 +18,13 @@ Session 事实、原子批次、乐观并发、Checkpoint 保留和进程重启�
 - 使用 Node 内置 `node:sqlite` 的 `DatabaseSync`，最低 Node 版本固定为 24.15；
 - 同步数据库 API 只封装在 `storage/adapters/sqlite`，事务内不调用模型、工具、Hook 或外部等待；
 - database schema v1 使用 `metadata`、`sessions`、`session_records`、`checkpoints` 四张表；
+- A1 schema v2 为 Session 增加 lineage/Profile 索引列；A2 schema v3 增加 `inbox_items` 与单 Session
+  active-claim 唯一索引；
 - 启用并验证 foreign keys、WAL、`synchronous=FULL`、`trusted_schema=OFF`、defensive mode 和有限 busy
   timeout；
 - 所有写操作使用 prepared statements 和短事务；Session record/Checkpoint 在 Core strict
   schema 之外再校验 SHA-256；
-- 未知数据库版本 fail closed，不在普通 open 时自动迁移。
+- 已知 v1/v2 使用可重试的加法迁移到 v3；未知或更高数据库版本仍 fail closed。
 
 ## 理由与后果
 

@@ -4,8 +4,8 @@
 status: active
 baseline_commit: a91cde6
 proposal_branch: codex/agent-core-evolution
-completed_stage: A1
-next_stage: A2
+completed_stage: A2
+next_stage: A3
 updated: 2026-08-27
 audience: 第一次接触 Agent 架构的读者、短上下文模型、实现者
 ```
@@ -38,9 +38,9 @@ flowchart TB
   Ports --> Adapters["Provider / Tool / Storage / Sandbox"]
   Extensions["ExtensionHost<br/>有生命周期的扩展"] --> Profile
 
-  Inbox --> Commit["Commit Barrier<br/>先提交，后生效"]
+  Inbox --> InboxDb[("Durable Inbox Store<br/>待办顺序真相")]
   Kernel --> Commit
-  Commit --> Log[("Append-only Session Log<br/>唯一持久事实源")]
+  Commit --> Log[("Append-only Session Log<br/>执行事实源")]
 
   Log --> State["RunState Projection<br/>控制循环使用"]
   Log --> Context["Model Context Projection<br/>模型可见内容"]
@@ -58,6 +58,7 @@ flowchart TB
 - Reducer 单向推进与状态不变量检查；
 - 模型流、工具调用、权限、审批、沙箱、取消和限制闭环；
 - append-only Session、校验和、乐观并发、Checkpoint 和跨进程恢复；
+- durable Inbox、幂等入队、租约领取和 AgentDriver 单会话串行控制；
 - OpenAI/DeepSeek 显式 Provider、Skill、Empty Memory、CLI 与 Composition Root；
 - 确定性测试、真实 bubblewrap E2E 和 benchmark replay。
 
@@ -81,6 +82,21 @@ flowchart TB
 A1 只固化 Profile 身份，不等于完整 ExtensionHost。Profile 内容快照、扩展安装/释放和贡献收集仍属于 A5。详细字段与迁移规则见
 [A1 Session v2 契约](../interfaces/a1-session-v2.md)。
 
+## A2 已经落地什么
+
+- `InboxStorePort` 把消息顺序与 pending/claimed/completed 状态做成独立持久真相；
+- 同一 Session 的 `idempotencyKey` 相同且消息相同会返回原 item，内容不同则 fail closed；
+- SQLite database schema v3 新增 `inbox_items`，已知 v1/v2 数据库做可重试的加法迁移；
+- 每个 Session 最多一个 active claim；SQLite 短事务和 partial unique index 共同防并发领取；
+- claim 有租约和 Driver 心跳，进程死亡后可以过期重领，长任务不会因固定租期被重复领取；
+- handler 失败释放为 pending；handler 已成功但 complete 失败时保留 claim，不立即重复外部副作用；
+- 生产 `runCodingAgent` 与 CLI 已先入队再执行，`--idempotency-key` 映射稳定 item/run/turn ID；
+- 已存在同一 Turn 时 Driver 从 Session 日志恢复同一个 Run，而不是另建 Run。
+
+Inbox 与 Session
+Log 没有混成一个对象：Inbox 回答“下一件待办”，Session 回答“执行中已经发生什么”。字段、状态机和失败窗口见
+[A2 Durable Inbox 与 AgentDriver](../interfaces/a2-durable-inbox.md)。
+
 ## 三类“真相”
 
 ### 1. 事实：Session Log
@@ -93,7 +109,8 @@ A1 只固化 Profile 身份，不等于完整 ExtensionHost。Profile 内容快�
 
 ### 3. 顺序：Inbox
 
-下一件要处理什么，只看持久 Inbox 的顺序和状态。`send`、`steer`、`follow-up`、恢复输入都先入队，再由 Driver 串行领取。
+下一件要处理什么，只看持久 Inbox 的顺序和状态。当前生产入口先支持普通 user message；未来增加
+`steer`、`follow-up` 时也必须走同一入队和串行领取边界。
 
 这三者不要合成一个大对象：事实、配置和待办的生命周期不同，分开才容易恢复和测试。
 
@@ -118,8 +135,8 @@ Outbox 的“先提交、后通知”。它们不是时髦词，而是在回答�
 | ---- | ------------------------------------------------- | -------- | ---------------------------------------------------- |
 | A0   | 文档和状态校正，本提案落地                        | 已完成   | 文档与代码、测试一致                                 |
 | A1   | Session v2：lineage、profile digest、扩展事实信封 | 已完成   | v1 可迁移；未知可忽略事件不破坏恢复                  |
-| A2   | AgentDriver + durable Inbox                       | 下一阶段 | 重启后消息不丢；重复输入不重复执行；单会话无并发竞态 |
-| A3   | `ContentBlock` + Context Projection               | 尚未开始 | 文本/图片/文件引用可穷尽映射；模型所见都有日志依据   |
+| A2   | AgentDriver + durable Inbox                       | 已完成   | 重启后消息不丢；重复输入不重复执行；单会话无并发竞态 |
+| A3   | `ContentBlock` + Context Projection               | 下一阶段 | 文本/图片/文件引用可穷尽映射；模型所见都有日志依据   |
 | A4   | append-only Compaction + Fork                     | 尚未开始 | 原记录保留；摘要带来源区间；可从历史边界派生新会话   |
 | A5   | Immutable Profile + ExtensionHost 生命周期        | 尚未开始 | 注册可撤销；同一 Profile 重放结果不因热更新漂移      |
 | A6   | AgentSupervisor / Subagent                        | 尚未开始 | 子 Agent 独立状态；取消、深度和预算可向下传播        |

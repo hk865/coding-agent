@@ -3,8 +3,8 @@
 ```yaml
 status: active
 baseline_commit: a91cde6
-completed_stage: A1
-next_stage: A2
+completed_stage: A2
+next_stage: A3
 updated: 2026-08-27
 ```
 
@@ -23,9 +23,9 @@ sequenceDiagram
   participant Projector as Projections
 
   User->>Driver: send(message, idempotencyKey)
-  Driver->>Inbox: 追加输入
-  Inbox->>Log: 提交 inbox.accepted
-  Log-->>Driver: revision 已确认
+  Driver->>Inbox: 事务追加 pending item
+  Inbox-->>Driver: sequence / itemId 已确认
+  Driver->>Inbox: claim（单 Session 租约）
   Driver->>Runner: 启动或继续一个 Run
   Runner->>Log: 提交 run/turn/model-request 事实
   Log-->>Runner: commit 成功
@@ -43,25 +43,25 @@ sequenceDiagram
   end
   Log->>Projector: 重放已提交事实
   Projector-->>User: UI/Trace/最终答案
-  Driver->>Inbox: 确认该输入已处理
+  Driver->>Inbox: complete；失败则 release
 ```
 
 ## 为什么一定要“先记账，再生效”
 
 如果先改内存状态、后写磁盘，写盘失败时会出现两个世界：进程认为工具已执行，恢复后却认为没有执行，可能重复修改文件。当前 required
-sink 已经避免了这个问题；下一阶段 Inbox 和扩展事实也必须遵守同一规则。
+sink 已经避免了这个问题；Inbox 也先持久化 pending
+item，再允许 Driver 领取。Inbox 是待办真相，Session Log 是执行事实真相，两者职责不同。
 
 ## 重启恢复
 
 1. 读取 Session Header，校验 schema、lineage 和 `profileDigest`；
 2. 按 position 验证校验和并重放 KernelEvent；
-3. 重建 RunState、Inbox 状态和 Context Projection；
+3. 从 `inbox_items` 读取顺序/租约状态，从 Session 重建 RunState；
 4. 对“已开始但结果未知”的外部操作做 reconciliation，不能猜成功；
 5. 只有恢复到稳定边界后，Driver 才领取下一条输入。
 
-其中第 1、2 步和 RunState 重建已经在 A1 落地：v2
-Profile 不匹配会在运行前失败；旧 v1 继续由 Turn 环境快照校验；未知且声明可忽略的扩展事实不会改变 RunState。Inbox 状态和独立 Context
-Projection 分别由 A2、A3 补齐。
+其中 Session/Profile/RunState 在 A1 落地，Inbox 状态和 Driver 恢复在 A2 落地。独立 Context
+Projection 由 A3 补齐。
 
 ## 压缩不是删除
 

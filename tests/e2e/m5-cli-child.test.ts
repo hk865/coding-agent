@@ -331,7 +331,7 @@ describe("M5 CLI child-process replay", () => {
       "--non-interactive",
     ]).result;
 
-    expect(result.code).toBe(0);
+    expect(result.code, result.stderr).toBe(0);
     expect(result.stdout).toBe("approval denied safely\n");
     expect(JSON.stringify(server.requests[1]!.body)).toContain("interaction_unavailable");
     await expect(readFile(workspace.resolve("forbidden.txt"), "utf8")).rejects.toMatchObject({

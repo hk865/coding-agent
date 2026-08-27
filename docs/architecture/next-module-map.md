@@ -3,8 +3,8 @@
 ```yaml
 status: active
 baseline_commit: a91cde6
-completed_stage: A1
-next_stage: A2
+completed_stage: A2
+next_stage: A3
 updated: 2026-08-27
 ```
 
@@ -38,6 +38,7 @@ flowchart LR
     ModelPort["ModelClientPort"]
     ToolPort["ToolExecutorPort"]
     StorePort["SessionStorePort"]
+    InboxPort["InboxStorePort"]
     PolicyPort["Policy / Workflow Ports"]
   end
 
@@ -59,6 +60,7 @@ flowchart LR
   Host --> Supervisor
   Supervisor --> Driver
   Driver --> Inbox
+  Inbox --> InboxPort
   Driver --> Profile
   Driver --> Runner
   Profile --> ExtensionHost
@@ -80,6 +82,7 @@ flowchart LR
   Tools -.implements.-> ToolPort
   Safety -.implements.-> PolicyPort
   Storage -.implements.-> StorePort
+  Storage -.implements.-> InboxPort
 ```
 
 ## 每个模块只回答一个问题
@@ -127,7 +130,7 @@ src/
 
 这是目标边界，不要求一次搬目录。先新增接口和兼容层，再小步迁移；避免为了“看起来整齐”制造无功能收益的大规模重命名。
 
-## 当前落点（A1）
+## 当前落点（A1–A2）
 
 目标图没有被一次性搭空架子。A1 只落了下一阶段真正依赖的地基：
 
@@ -137,10 +140,15 @@ src/core/ports/session_store/
   session-projection.ts       # Core 投影跳过未知可忽略事实
 src/app/composition/
   agent-profile.ts            # 生成并核对生产 Profile 身份
+  composition-root.ts         # 生产消息先入 Inbox，再由 Driver 执行/恢复
+src/agent/driver/
+  agent-driver.ts             # claim -> handle -> complete/release + heartbeat
+src/core/ports/inbox_store/
+  inbox-store-port.ts         # durable Inbox 状态机与端口
 src/storage/adapters/
-  in_memory/                  # 同一 Session v1/v2 契约
-  sqlite/                     # database schema v1 -> v2 原位迁移
+  in_memory/                  # Session/Checkpoint/Inbox 同语义测试适配器
+  sqlite/                     # database schema v1/v2 -> v3 加法迁移
 ```
 
-`AgentDriver` 和 durable `Inbox`
-尚未伪造接口，它们是 A2 的下一次实际改造。这样每个阶段都由真实使用路径和 contract 测试牵引。
+下一阶段 A3 增加 `ContentBlock` 与独立 Context Projection；不会把多媒体、摘要或模型格式转换塞进
+`AgentDriver`。

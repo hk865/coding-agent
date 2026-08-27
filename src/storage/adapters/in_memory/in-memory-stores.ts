@@ -16,6 +16,25 @@ import {
   createCheckpoint,
 } from "../../../core/ports/checkpoint_store/checkpoint-store-port.js";
 import type {
+  ClaimInboxInput,
+  CompleteInboxInput,
+  EnqueueInboxInput,
+  EnqueueInboxResult,
+  InboxItem,
+  InboxListPage,
+  InboxStorePort,
+  RenewInboxClaimInput,
+  ReleaseInboxInput,
+} from "../../../core/ports/inbox_store/inbox-store-port.js";
+import {
+  claimInboxInputSchema,
+  completeInboxInputSchema,
+  enqueueInboxInputSchema,
+  inboxItemSchema,
+  renewInboxClaimInputSchema,
+  releaseInboxInputSchema,
+} from "../../../core/ports/inbox_store/inbox-store-port.js";
+import type {
   AppendSessionResult,
   CreateSessionInput,
   ReadSessionPage,
@@ -75,10 +94,12 @@ function draftMatches(
   );
 }
 
-export class InMemoryStores implements SessionStorePort, CheckpointStorePort {
+export class InMemoryStores implements SessionStorePort, CheckpointStorePort, InboxStorePort {
   readonly #sessions = new Map<string, StoredSession>();
   readonly #recordsById = new Map<string, SessionRecord>();
   readonly #checkpoints = new Map<string, Checkpoint>();
+  readonly #inboxBySession = new Map<string, InboxItem[]>();
+  readonly #inboxByItemId = new Map<string, InboxItem>();
   #closed = false;
 
   async create(
@@ -232,6 +253,245 @@ export class InMemoryStores implements SessionStorePort, CheckpointStorePort {
     };
   }
 
+  async enqueue(
+    inputValue: Readonly<EnqueueInboxInput>,
+    options: Readonly<StoreCallOptions>,
+  ): Promise<EnqueueInboxResult> {
+    this.#assertOpen();
+    cancelled(options);
+    let input: EnqueueInboxInput;
+    try {
+      input = enqueueInboxInputSchema.parse(inputValue);
+    } catch {
+      throw new StoreError("invalid_record", "Inbox enqueue input 非法");
+    }
+    this.#session(input.sessionId);
+    const items = this.#inboxBySession.get(input.sessionId) ?? [];
+    const byKey = items.find((item) => item.idempotencyKey === input.idempotencyKey);
+    if (byKey) {
+      if (canonicalJson(byKey.message) !== canonicalJson(input.message)) {
+        throw new StoreError("idempotency_conflict", "Inbox 幂等键的重试内容不同");
+      }
+      return { item: clone(byKey), created: false };
+    }
+    if (this.#inboxByItemId.has(input.itemId)) {
+      throw new StoreError("idempotency_conflict", "Inbox itemId 已被其他消息使用");
+    }
+    const item = inboxItemSchema.parse({
+      schemaVersion: 1,
+      itemId: input.itemId,
+      sessionId: input.sessionId,
+      sequence: items.length + 1,
+      idempotencyKey: input.idempotencyKey,
+      kind: "user_message",
+      message: input.message,
+      acceptedAt: input.acceptedAt,
+      status: "pending",
+      deliveryAttempt: 0,
+      lastClaim: null,
+      lastFailure: null,
+      releasedAt: null,
+      completedAt: null,
+      completion: null,
+    });
+    cancelled(options);
+    items.push(item);
+    this.#inboxBySession.set(input.sessionId, items);
+    this.#inboxByItemId.set(input.itemId, item);
+    return { item: clone(item), created: true };
+  }
+
+  async claimNext(
+    inputValue: Readonly<ClaimInboxInput>,
+    options: Readonly<StoreCallOptions>,
+  ): Promise<InboxItem | null> {
+    this.#assertOpen();
+    cancelled(options);
+    let input: ClaimInboxInput;
+    try {
+      input = claimInboxInputSchema.parse(inputValue);
+    } catch {
+      throw new StoreError("invalid_record", "Inbox claim input 非法");
+    }
+    this.#session(input.sessionId);
+    const items = this.#inboxBySession.get(input.sessionId) ?? [];
+    const active = items.find((item) => item.status === "claimed");
+    let target: InboxItem | undefined;
+    if (active?.status === "claimed") {
+      if (
+        active.lastClaim.claimToken === input.claim.claimToken &&
+        active.lastClaim.claimedBy === input.claim.claimedBy
+      ) {
+        return clone(active);
+      }
+      if (Date.parse(active.lastClaim.leaseExpiresAt) > Date.parse(input.claim.claimedAt)) {
+        return null;
+      }
+      target = active;
+    } else {
+      target = items.find((item) => item.status === "pending");
+    }
+    if (!target) return null;
+    if (Date.parse(input.claim.claimedAt) < Date.parse(target.acceptedAt)) {
+      throw new StoreError("invalid_record", "Inbox claimedAt 早于 acceptedAt");
+    }
+    const claimed = inboxItemSchema.parse({
+      ...target,
+      status: "claimed",
+      deliveryAttempt: target.deliveryAttempt + 1,
+      lastClaim: input.claim,
+      releasedAt: null,
+      completedAt: null,
+      completion: null,
+    });
+    cancelled(options);
+    this.#replaceInboxItem(claimed);
+    return clone(claimed);
+  }
+
+  async complete(
+    inputValue: Readonly<CompleteInboxInput>,
+    options: Readonly<StoreCallOptions>,
+  ): Promise<InboxItem> {
+    this.#assertOpen();
+    cancelled(options);
+    let input: CompleteInboxInput;
+    try {
+      input = completeInboxInputSchema.parse(inputValue);
+    } catch {
+      throw new StoreError("invalid_record", "Inbox complete input 非法");
+    }
+    const item = this.#inboxItem(input.itemId, input.sessionId);
+    if (item.status === "completed") {
+      if (
+        item.lastClaim.claimToken === input.claimToken &&
+        item.completedAt === input.completedAt &&
+        canonicalJson(item.completion) === canonicalJson(input.completion)
+      ) {
+        return clone(item);
+      }
+      throw new StoreError("idempotency_conflict", "Inbox complete 重试内容不同");
+    }
+    if (item.status !== "claimed" || item.lastClaim.claimToken !== input.claimToken) {
+      throw new StoreError("conflict", "Inbox item 未由该 claim 持有");
+    }
+    if (Date.parse(input.completedAt) < Date.parse(item.lastClaim.claimedAt)) {
+      throw new StoreError("invalid_record", "Inbox completedAt 早于 claimedAt");
+    }
+    const completed = inboxItemSchema.parse({
+      ...item,
+      status: "completed",
+      releasedAt: null,
+      completedAt: input.completedAt,
+      completion: input.completion,
+    });
+    cancelled(options);
+    this.#replaceInboxItem(completed);
+    return clone(completed);
+  }
+
+  async renewClaim(
+    inputValue: Readonly<RenewInboxClaimInput>,
+    options: Readonly<StoreCallOptions>,
+  ): Promise<InboxItem> {
+    this.#assertOpen();
+    cancelled(options);
+    let input: RenewInboxClaimInput;
+    try {
+      input = renewInboxClaimInputSchema.parse(inputValue);
+    } catch {
+      throw new StoreError("invalid_record", "Inbox renew input 非法");
+    }
+    const item = this.#inboxItem(input.itemId, input.sessionId);
+    if (item.status !== "claimed" || item.lastClaim.claimToken !== input.claimToken) {
+      throw new StoreError("conflict", "Inbox item 未由该 claim 持有");
+    }
+    if (input.leaseExpiresAt === item.lastClaim.leaseExpiresAt) return clone(item);
+    if (
+      Date.parse(input.renewedAt) < Date.parse(item.lastClaim.claimedAt) ||
+      Date.parse(input.leaseExpiresAt) <= Date.parse(item.lastClaim.leaseExpiresAt)
+    ) {
+      throw new StoreError("invalid_record", "Inbox 续租不能倒退");
+    }
+    const renewed = inboxItemSchema.parse({
+      ...item,
+      lastClaim: { ...item.lastClaim, leaseExpiresAt: input.leaseExpiresAt },
+    });
+    cancelled(options);
+    this.#replaceInboxItem(renewed);
+    return clone(renewed);
+  }
+
+  async release(
+    inputValue: Readonly<ReleaseInboxInput>,
+    options: Readonly<StoreCallOptions>,
+  ): Promise<InboxItem> {
+    this.#assertOpen();
+    cancelled(options);
+    let input: ReleaseInboxInput;
+    try {
+      input = releaseInboxInputSchema.parse(inputValue);
+    } catch {
+      throw new StoreError("invalid_record", "Inbox release input 非法");
+    }
+    const item = this.#inboxItem(input.itemId, input.sessionId);
+    if (
+      item.status === "pending" &&
+      item.lastClaim?.claimToken === input.claimToken &&
+      item.releasedAt === input.releasedAt &&
+      canonicalJson(item.lastFailure) === canonicalJson(input.failure)
+    ) {
+      return clone(item);
+    }
+    if (item.status !== "claimed" || item.lastClaim.claimToken !== input.claimToken) {
+      throw new StoreError("conflict", "Inbox item 未由该 claim 持有");
+    }
+    if (Date.parse(input.releasedAt) < Date.parse(item.lastClaim.claimedAt)) {
+      throw new StoreError("invalid_record", "Inbox releasedAt 早于 claimedAt");
+    }
+    const pending = inboxItemSchema.parse({
+      ...item,
+      status: "pending",
+      lastFailure: input.failure,
+      releasedAt: input.releasedAt,
+      completedAt: null,
+      completion: null,
+    });
+    cancelled(options);
+    this.#replaceInboxItem(pending);
+    return clone(pending);
+  }
+
+  async getItem(itemId: string, options: Readonly<StoreCallOptions>): Promise<InboxItem> {
+    this.#assertOpen();
+    cancelled(options);
+    const item = this.#inboxByItemId.get(itemId);
+    if (!item) throw new StoreError("not_found", "Inbox item 不存在");
+    return clone(inboxItemSchema.parse(item));
+  }
+
+  async listInbox(
+    sessionId: string,
+    afterSequence: number,
+    limit: number,
+    options: Readonly<StoreCallOptions>,
+  ): Promise<InboxListPage> {
+    this.#assertOpen();
+    cancelled(options);
+    this.#session(sessionId);
+    positiveLimit(limit);
+    if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) {
+      throw new StoreError("invalid_record", "Inbox afterSequence 非法");
+    }
+    const all = this.#inboxBySession.get(sessionId) ?? [];
+    const items = all.slice(afterSequence, afterSequence + limit);
+    const lastSequence = items.at(-1)?.sequence ?? afterSequence;
+    return {
+      items: clone(items.map((item) => inboxItemSchema.parse(item))),
+      nextSequence: lastSequence < all.length ? lastSequence : null,
+    };
+  }
+
   async save(
     draft: Readonly<CheckpointDraft>,
     options: Readonly<StoreCallOptions>,
@@ -326,6 +586,21 @@ export class InMemoryStores implements SessionStorePort, CheckpointStorePort {
     const session = this.#sessions.get(sessionId);
     if (!session) throw new StoreError("not_found", "Session 不存在");
     return session;
+  }
+
+  #inboxItem(itemId: string, sessionId: string): InboxItem {
+    const item = this.#inboxByItemId.get(itemId);
+    if (!item) throw new StoreError("not_found", "Inbox item 不存在");
+    if (item.sessionId !== sessionId) throw new StoreError("not_found", "Inbox item 不存在");
+    return item;
+  }
+
+  #replaceInboxItem(item: InboxItem): void {
+    const items = this.#inboxBySession.get(item.sessionId);
+    const index = items?.findIndex((candidate) => candidate.itemId === item.itemId) ?? -1;
+    if (!items || index < 0) throw new StoreError("internal", "Inbox item 索引损坏");
+    items[index] = item;
+    this.#inboxByItemId.set(item.itemId, item);
   }
 
   #assertOpen(): void {

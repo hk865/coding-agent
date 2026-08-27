@@ -302,7 +302,7 @@ it("SQLite 原位迁移 database schema v1，且不改写旧 Session 记录", as
     Record<string, unknown>
   >;
   migrated.close();
-  expect(version["value"]).toBe("2");
+  expect(version["value"]).toBe("3");
   expect(columns.map((column) => column["name"])).toEqual(
     expect.arrayContaining(["lineage_json", "profile_json"]),
   );

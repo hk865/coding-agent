@@ -85,6 +85,7 @@ describe("M5 Composition smoke", () => {
       workspaceRoot: workspace.root,
       input: "只返回 replay 结果",
       sessionId: "session-m5-smoke",
+      idempotencyKey: "smoke-request-1",
       providerRegistry: registry,
       secretSource: {
         get(name) {
@@ -101,6 +102,18 @@ describe("M5 Composition smoke", () => {
     expect(result.enabledTools).toEqual(["read", "edit", "shell"]);
     expect(requestedSecrets).toEqual(["DEEPSEEK_API_KEY"]);
     expect(output).toBe("M5 replay ok");
+
+    await expect(
+      runCodingAgent({
+        config,
+        workspaceRoot: workspace.root,
+        input: "只返回 replay 结果",
+        sessionId: "session-m5-smoke",
+        idempotencyKey: "smoke-request-1",
+        providerRegistry: registry,
+        secretSource: { get: () => "fixture-secret-never-persist" },
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
 
     const changedConfig = appConfigSchema.parse({
       ...config,
@@ -126,6 +139,15 @@ describe("M5 Composition smoke", () => {
         schemaVersion: 2,
         lineage: { kind: "root", delegationDepth: 0 },
         profile: { profileId: "coding-agent.default", profileVersion: "a1-v1" },
+      });
+      const inbox = await store.listInbox("session-m5-smoke", 0, 10, {
+        signal: new AbortController().signal,
+      });
+      expect(inbox.items).toHaveLength(1);
+      expect(inbox.items[0]).toMatchObject({
+        itemId: result.inboxItemId,
+        status: "completed",
+        deliveryAttempt: 1,
       });
       const page = await store.read("session-m5-smoke", 0, 100, {
         signal: new AbortController().signal,
