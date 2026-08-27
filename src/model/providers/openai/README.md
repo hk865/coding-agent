@@ -16,7 +16,7 @@ updated: 2026-08-27
 ## 当前状态
 
 已实现官方 SDK Responses API
-Adapter、流式文本/ToolCall/usage/错误/取消映射；真实网络 smoke 尚待授权和记录。
+Adapter、流式文本/ToolCall/usage/错误/取消映射；低预算 text + 不执行 ToolCall 的 acceptance 工具已就绪，真实网络结果仍待凭据授权和记录。
 
 ## 已实现
 

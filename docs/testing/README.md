@@ -16,6 +16,8 @@ npm run test:e2e
 npm run test:e2e:bwrap
 npm run benchmark:validate
 npm run benchmark:baseline:replay
+npm run smoke:providers -- --provider <openai|deepseek> --model <model-id>
+npm run benchmark:baseline:real -- --provider <openai|deepseek> --model <model-id>
 npm run check
 ```
 

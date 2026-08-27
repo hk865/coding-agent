@@ -280,11 +280,17 @@ export async function preflightBenchmarkSuite(tasksRoot) {
 }
 
 export async function currentRevision(projectRoot) {
+  const status = await runCommand("git", ["status", "--porcelain=v1", "--untracked-files=normal"], {
+    cwd: projectRoot,
+    timeoutMs: 5_000,
+  });
+  if (status.exitCode !== 0 || status.stdout.trim().length > 0) return "uncommitted";
   const command = await runCommand("git", ["rev-parse", "HEAD"], {
     cwd: projectRoot,
     timeoutMs: 5_000,
   });
-  return command.exitCode === 0 ? command.stdout.trim() : "uncommitted";
+  const revision = command.stdout.trim();
+  return command.exitCode === 0 && /^[a-f0-9]{40}$/.test(revision) ? revision : "uncommitted";
 }
 
 export function emptyMetrics(wallClockMs) {

@@ -6,9 +6,11 @@
 - [x] `npm run check` 全部通过；
 - [x] 支持 bubblewrap 的 Linux runner 上 `npm run test:e2e:bwrap` 通过（本地 WSL，6/6）；
 - [ ] OpenAI 与 DeepSeek 分别完成纯文本和无副作用 function ToolCall smoke；
+  - acceptance 工具与脱敏 summary schema 已完成；只有真实凭据运行结果可勾选本项。
 - [x] 4 个 canary 的 base/oracle/near-miss/repeat preflight 通过；
 - [x] 固定 replay baseline 生成完整 schema、trace、diff 和 evaluator log；
 - [ ] 固定真实模型 baseline 完成并保存 Provider/model/prompt/预算/commit；
+  - runner 已强制 clean commit，并支持 `CODING_AGENT_BWRAP_PATH`；当前仍缺真实凭据结果。
 - [x] README、architecture、interfaces、data-flow、development、testing 与当前候选代码复核一致；
 - [x] 没有未记录的 P0 安全问题或阻塞缺陷。
 

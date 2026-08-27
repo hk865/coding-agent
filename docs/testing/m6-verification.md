@@ -20,6 +20,10 @@ scope: M6 质量门禁、canary、结果协议、安全验收和剩余外部环�
 - 实现 strict benchmark task/trial/summary schema、结果分类、trace、diff、evaluator log 和汇总；
 - 4 个 `internal-mvp@0.1.0` canary 均通过 base/oracle/near-miss/重复 evaluator 预检；
 - 固定 oracle replay baseline 为 4/4 resolved。它只证明 harness 与 evaluator，不是模型成绩。
+- 新增可重复的真实 Provider smoke：每个 Provider 固定执行 text 与不落地的 ToolCall，strict
+  summary 只保存 commit/模型/预算、事件类型、usage 和内容哈希；
+- 真实 baseline 现在拒绝 dirty worktree，并复用生产支持的绝对
+  `CODING_AGENT_BWRAP_PATH`；避免把旧 commit 或缺少系统 bwrap 误记为可信成绩；
 - 稳定基线已提交为 `a91cde6` 并推送到 GitHub `main`。
 - GitHub Actions 的确定性质量门禁和 replay artifact job 已有实际成功记录；最初的 sandbox
   job 在测试前被 Ubuntu 24.04 AppArmor 的 user namespace 默认限制挡住。
@@ -29,8 +33,9 @@ scope: M6 质量门禁、canary、结果协议、安全验收和剩余外部环�
 
 ## 尚未关闭
 
-- OpenAI 尚未进行真实网络 smoke；DeepSeek 已有纯文本 smoke，但两个 Provider 的真实无副作用 function
-  ToolCall smoke 尚未完整记录；
+- 当前环境没有 `OPENAI_API_KEY` 与
+  `DEEPSEEK_API_KEY`。Smoke 工具和脱敏证据协议已就绪，但 OpenAI 尚未真实运行，DeepSeek 仍只有旧的纯文本记录；两个 Provider 的真实无副作用 function
+  ToolCall 尚不能勾选；
 - 真实模型 canary baseline 尚未运行：下一次运行必须在 bubblewrap
   runner 上固定 Provider、model、prompt、预算、凭据来源和 commit；
 - 大规模约 40 个任务和外部 benchmark 仍属于 MVP 后扩容。

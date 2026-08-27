@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { constants } from "node:fs";
 import { access, appendFile, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -18,6 +19,17 @@ import {
 } from "./benchmark-harness.mjs";
 
 const MAX_CAPTURE_BYTES = 1024 * 1024;
+
+export async function resolveBubblewrapPath(environment = process.env) {
+  const candidate = environment.CODING_AGENT_BWRAP_PATH ?? "/usr/bin/bwrap";
+  if (!path.isAbsolute(candidate)) return null;
+  try {
+    await access(candidate, constants.X_OK);
+    return candidate;
+  } catch {
+    return null;
+  }
+}
 
 async function runAgentProcess(loaded, prepared, options) {
   const args = [
@@ -134,10 +146,13 @@ async function runTask(loaded, options) {
   const prepared = await prepareWorkspace(loaded, "base");
   try {
     if (loaded.task.requireBubblewrap) {
-      try {
-        await access("/usr/bin/bwrap");
-      } catch {
-        return environmentFailure(loaded, prepared, "bubblewrap unavailable");
+      const bwrapPath = await resolveBubblewrapPath();
+      if (!bwrapPath) {
+        return environmentFailure(
+          loaded,
+          prepared,
+          "bubblewrap unavailable: set CODING_AGENT_BWRAP_PATH to an absolute executable path",
+        );
       }
     }
     const agentCommand = await runAgentProcess(loaded, prepared, options);

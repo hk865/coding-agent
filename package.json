@@ -25,6 +25,7 @@
     "benchmark:validate": "node benchmarks/harness/cli.mjs preflight",
     "benchmark:baseline:replay": "node benchmarks/harness/cli.mjs baseline --mode oracle",
     "benchmark:baseline:real": "node benchmarks/harness/cli.mjs baseline --mode agent",
+    "smoke:providers": "npm run build && node benchmarks/harness/provider-smoke.mjs",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run check:architecture && npm run benchmark:validate"
   },
   "devDependencies": {
