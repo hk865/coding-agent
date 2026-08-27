@@ -20,8 +20,8 @@ ToolCall/usage/错误/取消转换；不负责 Runtime 重试、Tool 执行、�
 已实现官方 endpoint 的 Chat Completions/SSE
 Adapter、ToolCall 聚合、usage、错误和取消映射。已有真实纯文本 smoke；无副作用 function
 ToolCall 也已在 M6 候选提交 `f2f8f40` 上由 `deepseek-v4-flash`
-真实通过；函数只生成固定参数，没有执行。正式 4-canary baseline 已在提交 `dda8bdf` 上完成：3
-resolved、1 timeout，`resolvedAt1=0.75`，无 Agent/环境/evaluator/Policy error。
+真实通过；函数只生成固定参数，没有执行。正式 4-canary baseline 已在提交 `bbf1be1` 上完成：4/4
+resolved，`resolvedAt1=1`，所有错误类别均为 0。
 
 ## 已实现
 

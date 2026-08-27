@@ -61,7 +61,7 @@ M5 新增真实 CLI 子进程离线回放，覆盖
 - DeepSeek 已完成真实文本与无副作用 function ToolCall
   smoke；OpenAI 真实 smoke 仍待凭据。可重复的低预算 smoke 与脱敏证据工具已经就绪；
 - 固定 replay baseline 是 harness 自检，不是模型能力成绩；DeepSeek 真实 4-canary baseline 已在提交
-  `dda8bdf` 完成：3 resolved、1 timeout，`resolvedAt1=0.75`，无非成绩错误；
+  `bbf1be1` 完成：4/4 resolved，`resolvedAt1=1`，所有错误类别均为 0；
 - 稳定基线已形成可追溯 Git commit 并推送；发布 tag 尚未创建；
 - 长期 Memory、完整 MCP、自动 Provider 路由和约 40-task 扩容仍延期。
 

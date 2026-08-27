@@ -44,30 +44,31 @@ scope: M6 质量门禁、canary、结果协议、安全验收和剩余外部环�
 
 ## DeepSeek 真实 canary baseline
 
-正式成绩来自干净提交 `dda8bdfc18ad27b8c5a567c92dbad842c7a95555`：
+正式成绩来自干净提交 `bbf1be112fa53a5878275d8262e66678cab5daed`：
 
 | 字段       | 固定值                                        |
 | ---------- | --------------------------------------------- |
-| run        | `m6-real-deepseek-dda8bdf`                    |
+| run        | `m6-real-deepseek-bbf1be1`                    |
 | dataset    | `internal-mvp@0.1.0`，4 个合成 canary         |
 | Provider   | DeepSeek 官方 endpoint                        |
 | model      | `deepseek-v4-flash`                           |
 | options    | `thinking=disabled`                           |
 | prompt     | `m6-canary-v1`                                |
 | isolation  | `bubblewrap-required`，network disabled       |
-| 总结果     | 3 resolved、1 timeout，`resolvedAt1 = 0.75`   |
+| 总结果     | 4 resolved，`resolvedAt1 = 1`                 |
 | 非成绩错误 | agent/environment/evaluator/policy error 均 0 |
 
-| 任务                        | 结果     | model/tool requests  | input/output/cached tokens |
-| --------------------------- | -------- | -------------------- | -------------------------- |
-| `node-bearer-auth`          | resolved | 6 / 6                | 11590 / 1139 / 9856        |
-| `python-slug-normalization` | resolved | 6 / 6                | 10561 / 818 / 8960         |
-| `recovery-exactly-once`     | resolved | 5 / 5                | 8623 / 642 / 7168          |
-| `ts-nullish-timeout`        | timeout  | 子进程超时无 summary | usage 不可得               |
+| 任务                        | 结果     | model/tool requests | input/output/cached tokens |
+| --------------------------- | -------- | ------------------- | -------------------------- |
+| `node-bearer-auth`          | resolved | 5 / 5               | 8339 / 822 / 6912          |
+| `python-slug-normalization` | resolved | 5 / 6               | 8295 / 779 / 6784          |
+| `recovery-exactly-once`     | resolved | 5 / 5               | 8303 / 819 / 6912          |
+| `ts-nullish-timeout`        | resolved | 5 / 4               | 7315 / 558 / 6016          |
 
-最后一项的工作区已通过 5 项 evaluator，但 Agent 未在任务固定的 30 秒内产生终态，因此仍严格记为
-`timeout`，不改写成 resolved。前序 run `m6-real-deepseek-7faa619`、`m6-real-deepseek-973ceb3` 和
-`m6-real-deepseek-0b7024c` 含请求层/Agent/Policy 错误，只作为排障证据，不计入模型成绩。
+四项均由 Agent 在各自 30 秒固定预算内产生终态并通过 evaluator。前序 run
+`m6-real-deepseek-7faa619`、`m6-real-deepseek-973ceb3` 和 `m6-real-deepseek-0b7024c`
+含请求层/Agent/Policy 错误，只作为排障证据，不计入模型成绩；`m6-real-deepseek-dda8bdf` 的 3
+resolved + 1 timeout 成绩已由当前最终候选 run 取代。
 
 ## 尚未关闭
 
