@@ -15,6 +15,12 @@ import { validateToolDefinition } from "../schemas/tool-schemas.js";
 
 const OMITTED_MODEL_SCHEMA_KEYS = new Set(["$schema", "minLength", "maxLength"]);
 
+function schemaRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
 function compatibleModelSchema(value: unknown): unknown {
   if (Array.isArray(value)) return value.map((item) => compatibleModelSchema(item));
   if (!value || typeof value !== "object") return value;
@@ -32,12 +38,62 @@ function compatibleModelSchema(value: unknown): unknown {
   return result;
 }
 
+function mergePropertySchemas(variants: readonly unknown[]): unknown {
+  const unique = [...new Map(variants.map((value) => [JSON.stringify(value), value])).values()];
+  if (unique.length === 1) return unique[0];
+  const records = unique.map((value) => schemaRecord(value));
+  if (records.every((record) => record?.["type"] === "string" && Array.isArray(record["enum"]))) {
+    return {
+      type: "string",
+      enum: [...new Set(records.flatMap((record) => record?.["enum"] as unknown[]))],
+    };
+  }
+  return { anyOf: unique };
+}
+
+function objectRootModelSchema(value: unknown): unknown {
+  const schema = schemaRecord(value);
+  const variants = schema?.["anyOf"];
+  if (!Array.isArray(variants) || variants.length === 0) return value;
+  const records = variants.map((variant) => schemaRecord(variant));
+  if (records.some((record) => record?.["type"] !== "object")) return value;
+
+  const propertiesByName = new Map<string, unknown[]>();
+  for (const record of records) {
+    const properties = schemaRecord(record?.["properties"]);
+    if (!properties) return value;
+    for (const [name, propertySchema] of Object.entries(properties)) {
+      propertiesByName.set(name, [...(propertiesByName.get(name) ?? []), propertySchema]);
+    }
+  }
+  const requiredLists = records.map((record) =>
+    Array.isArray(record?.["required"]) ? (record["required"] as unknown[]) : [],
+  );
+  const required = requiredLists[0]?.filter(
+    (name): name is string =>
+      typeof name === "string" && requiredLists.every((names) => names.includes(name)),
+  );
+  return {
+    type: "object",
+    properties: Object.fromEntries(
+      [...propertiesByName].map(([name, propertySchemas]) => [
+        name,
+        mergePropertySchemas(propertySchemas),
+      ]),
+    ),
+    ...(required && required.length > 0 ? { required } : {}),
+    additionalProperties: false,
+  };
+}
+
 function schemaForModel(definition: ToolDefinition): ModelToolSpec["inputSchema"] {
   const candidate = definition.inputSchema as unknown as { toJSONSchema?: () => unknown };
   if (typeof candidate.toJSONSchema === "function") {
     const generated = candidate.toJSONSchema();
     if (generated && typeof generated === "object" && !Array.isArray(generated)) {
-      return compatibleModelSchema(generated) as ModelToolSpec["inputSchema"];
+      return objectRootModelSchema(
+        compatibleModelSchema(generated),
+      ) as ModelToolSpec["inputSchema"];
     }
   }
   return { type: "object", additionalProperties: false };

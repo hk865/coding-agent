@@ -82,13 +82,22 @@ describe("M5 external Tool boundary", () => {
       summarize: () => ({ paths: [], cwd: null, commandPreview: null }),
     });
 
-    const [spec] = registry.freeze(["schema_probe"]).modelToolSpecs();
+    const snapshot = registry.freeze(["schema_probe"]);
+    const [spec] = snapshot.modelToolSpecs();
     const encoded = JSON.stringify(spec?.inputSchema);
-    expect(encoded).toContain('"anyOf"');
+    expect(spec?.inputSchema).toMatchObject({
+      type: "object",
+      properties: { mode: { type: "string", enum: ["create", "delete"] } },
+      required: ["mode"],
+      additionalProperties: false,
+    });
     expect(encoded).toContain('"enum"');
     expect(encoded).not.toContain('"$schema"');
     expect(encoded).not.toContain('"oneOf"');
     expect(encoded).not.toContain('"const"');
     expect(encoded).not.toContain('"minLength"');
+    expect(
+      snapshot.resolve("schema_probe")?.inputSchema.safeParse({ mode: "create" }).success,
+    ).toBe(false);
   });
 });

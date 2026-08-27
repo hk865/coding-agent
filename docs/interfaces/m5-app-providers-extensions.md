@@ -20,8 +20,9 @@ M5 已加入显式多 Provider App 边界：静态 `ProviderRegistry` 首批注�
 仍经过 Permission 与 Approval；缺少 bubblewrap 时 `shell` fail closed。测试用 `external_echo`
 证明外部 Tool 可只通过 Registry 接入，不修改 Runtime Loop。
 
-Registry 发给模型的 JSON Schema 会归一到跨 Provider 的保守子集（例如 `oneOf → anyOf`、
-`const → enum`，移除厂商不普遍支持的字符串长度关键字）。这只影响模型协议；工具执行前仍由原始 Zod
+Registry 发给模型的 JSON Schema 会归一到跨 Provider 的保守子集：顶层对象分支联合会合并成
+`type: object`，字面量变成
+`enum`，并移除厂商不普遍支持的字符串长度关键字。这只影响模型协议；工具执行前仍由原始 Zod
 schema 严格校验，因此不会放宽实际权限或输入边界。
 
 ## Skill 与 Memory
