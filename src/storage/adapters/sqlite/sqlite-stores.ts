@@ -31,9 +31,12 @@ import type {
   StoreCallOptions,
 } from "../../../core/ports/session_store/session-store-port.js";
 import {
+  agentProfileIdentitySchema,
   assertSessionRecordChecksum,
   canonicalJson,
   computeSessionRecordChecksum,
+  createSessionArtifacts,
+  sessionLineageSchema,
   sessionHeaderSchema,
   sessionRecordDraftSchema,
   sessionRecordSchema,
@@ -116,33 +119,22 @@ export class SqliteStores implements SessionStorePort, CheckpointStorePort {
     return this.#transaction(() => {
       if (this.#sessionRow(input.sessionId))
         throw new StoreError("already_exists", "Session 已存在");
-      const content = {
-        recordId: input.recordId,
-        sessionId: input.sessionId,
-        position: 1,
-        recordType: "session.created" as const,
-        schemaVersion: 1 as const,
-        recordedAt: input.createdAt,
-        payload: { sessionId: input.sessionId, createdAt: input.createdAt },
-      };
-      const record = sessionRecordSchema.parse({
-        ...content,
-        checksum: computeSessionRecordChecksum(content),
-      });
-      const header = sessionHeaderSchema.parse({
-        schemaVersion: 1,
-        sessionId: input.sessionId,
-        createdAt: input.createdAt,
-        updatedAt: input.createdAt,
-        revision: 1,
-        activeRunId: null,
-        activeTurnId: null,
-      });
+      const { record, header } = createSessionArtifacts(input);
       this.#database
         .prepare(
-          "INSERT INTO sessions(session_id,schema_version,created_at,updated_at,revision,active_run_id,active_turn_id) VALUES(?,?,?,?,?,?,?)",
+          "INSERT INTO sessions(session_id,schema_version,created_at,updated_at,revision,active_run_id,active_turn_id,lineage_json,profile_json) VALUES(?,?,?,?,?,?,?,?,?)",
         )
-        .run(input.sessionId, 1, input.createdAt, input.createdAt, 1, null, null);
+        .run(
+          input.sessionId,
+          header.schemaVersion,
+          input.createdAt,
+          input.createdAt,
+          1,
+          null,
+          null,
+          header.schemaVersion === 2 ? canonicalJson(header.lineage) : null,
+          header.schemaVersion === 2 ? canonicalJson(header.profile) : null,
+        );
       this.#insertRecord(record);
       cancelled(options);
       return clone(header);
@@ -276,7 +268,11 @@ export class SqliteStores implements SessionStorePort, CheckpointStorePort {
       .prepare("SELECT * FROM sessions ORDER BY updated_at DESC, session_id ASC LIMIT ? OFFSET ?")
       .all(limit + 1, offset) as Row[];
     const hasNext = rows.length > limit;
-    const selected = rows.slice(0, limit).map((row) => this.#rowToHeader(row));
+    const selected = rows.slice(0, limit).map((row) => {
+      const header = this.#rowToHeader(row);
+      this.#assertSessionV2Identity(header);
+      return header;
+    });
     return {
       sessions: clone(selected),
       nextCursor: hasNext ? String(offset + selected.length) : null,
@@ -415,7 +411,9 @@ export class SqliteStores implements SessionStorePort, CheckpointStorePort {
         updated_at TEXT NOT NULL,
         revision INTEGER NOT NULL,
         active_run_id TEXT,
-        active_turn_id TEXT
+        active_turn_id TEXT,
+        lineage_json TEXT,
+        profile_json TEXT
       ) STRICT;
       CREATE TABLE IF NOT EXISTS session_records(
         session_id TEXT NOT NULL REFERENCES sessions(session_id),
@@ -443,10 +441,18 @@ export class SqliteStores implements SessionStorePort, CheckpointStorePort {
       .prepare("SELECT value FROM metadata WHERE key='database_schema_version'")
       .get() as Row | undefined;
     if (!version) {
+      this.#ensureSessionV2Columns();
       this.#database
-        .prepare("INSERT INTO metadata(key,value) VALUES('database_schema_version','1')")
+        .prepare("INSERT INTO metadata(key,value) VALUES('database_schema_version','2')")
         .run();
-    } else if (version["value"] !== "1") {
+    } else if (version["value"] === "1") {
+      this.#ensureSessionV2Columns();
+      this.#database
+        .prepare("UPDATE metadata SET value='2' WHERE key='database_schema_version'")
+        .run();
+    } else if (version["value"] === "2") {
+      this.#ensureSessionV2Columns();
+    } else {
       throw new StoreError(
         "version_unsupported",
         `不支持数据库 schema version ${String(version["value"])}`,
@@ -459,6 +465,20 @@ export class SqliteStores implements SessionStorePort, CheckpointStorePort {
       Number(trustedSchema["trusted_schema"]) !== 0
     ) {
       throw new StoreError("internal", "SQLite 安全 PRAGMA 未生效");
+    }
+  }
+
+  #ensureSessionV2Columns(): void {
+    const columns = new Set(
+      (this.#database.prepare("PRAGMA table_info(sessions)").all() as Row[]).map((row) =>
+        String(row["name"]),
+      ),
+    );
+    if (!columns.has("lineage_json")) {
+      this.#database.exec("ALTER TABLE sessions ADD COLUMN lineage_json TEXT");
+    }
+    if (!columns.has("profile_json")) {
+      this.#database.exec("ALTER TABLE sessions ADD COLUMN profile_json TEXT");
     }
   }
 
@@ -534,19 +554,65 @@ export class SqliteStores implements SessionStorePort, CheckpointStorePort {
   #header(sessionId: string): SessionHeader {
     const row = this.#sessionRow(sessionId);
     if (!row) throw new StoreError("not_found", "Session 不存在");
-    return this.#rowToHeader(row);
+    const header = this.#rowToHeader(row);
+    this.#assertSessionV2Identity(header);
+    return header;
   }
 
   #rowToHeader(row: Row): SessionHeader {
-    return sessionHeaderSchema.parse({
-      schemaVersion: Number(row["schema_version"]),
+    const schemaVersion = Number(row["schema_version"]);
+    const common = {
       sessionId: String(row["session_id"]),
       createdAt: String(row["created_at"]),
       updatedAt: String(row["updated_at"]),
       revision: Number(row["revision"]),
       activeRunId: row["active_run_id"] === null ? null : String(row["active_run_id"]),
       activeTurnId: row["active_turn_id"] === null ? null : String(row["active_turn_id"]),
-    });
+    };
+    if (schemaVersion === 1) {
+      return sessionHeaderSchema.parse({ ...common, schemaVersion: 1 });
+    }
+    if (schemaVersion === 2) {
+      return sessionHeaderSchema.parse({
+        ...common,
+        schemaVersion: 2,
+        lineage: parseJson(
+          row["lineage_json"],
+          (value) => sessionLineageSchema.parse(value),
+          "Session lineage",
+        ),
+        profile: parseJson(
+          row["profile_json"],
+          (value) => agentProfileIdentitySchema.parse(value),
+          "Agent profile identity",
+        ),
+      });
+    }
+    throw new StoreError("version_unsupported", `不支持 Session schema version ${schemaVersion}`);
+  }
+
+  #assertSessionV2Identity(header: SessionHeader): void {
+    if (header.schemaVersion === 1) return;
+    const row = this.#database
+      .prepare("SELECT record_json FROM session_records WHERE session_id=? AND position=1")
+      .get(header.sessionId) as Row | undefined;
+    if (!row) throw new StoreError("corrupt", "Session v2 缺少 session.created", 0);
+    const record = parseJson(
+      row["record_json"],
+      (value) => sessionRecordSchema.parse(value),
+      "Session created record",
+    );
+    assertSessionRecordChecksum(record);
+    if (
+      record.recordType !== "session.created" ||
+      record.schemaVersion !== 2 ||
+      record.payload.sessionId !== header.sessionId ||
+      record.payload.createdAt !== header.createdAt ||
+      canonicalJson(record.payload.lineage) !== canonicalJson(header.lineage) ||
+      canonicalJson(record.payload.profile) !== canonicalJson(header.profile)
+    ) {
+      throw new StoreError("corrupt", "Session v2 Header 与创建事实不一致", 0);
+    }
   }
 
   #checkpointById(checkpointId: string): Checkpoint | null {

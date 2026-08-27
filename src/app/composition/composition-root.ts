@@ -27,6 +27,11 @@ import { createReadToolDefinition } from "../../tools/builtin/read/read-tool.js"
 import { createShellToolDefinition } from "../../tools/builtin/shell/shell-tool.js";
 import { ToolDispatcher } from "../../tools/dispatcher/tool-dispatcher.js";
 import { RegistryToolBatchPolicy, ToolRegistry } from "../../tools/registry/tool-registry.js";
+import {
+  assertSessionProfileCompatible,
+  createAgentProfileIdentity,
+  ROOT_SESSION_LINEAGE,
+} from "./agent-profile.js";
 import type { AppConfig } from "./app-config.js";
 
 export interface SecretSource {
@@ -121,6 +126,7 @@ export async function runCodingAgent(input: Readonly<RunAppInput>): Promise<RunA
     sandboxProfileVersion: processProfile.version,
     baseConfigDigest: baseDigest,
   };
+  const profile = createAgentProfileIdentity(input.config, snapshot);
 
   const store = await SqliteStores.open(path.resolve(input.config.storage.databasePath));
   try {
@@ -128,11 +134,19 @@ export async function runCodingAgent(input: Readonly<RunAppInput>): Promise<RunA
     try {
       const existing = await store.get(sessionId, { signal });
       if (existing.activeRunId) throw new Error(`Session ${sessionId} 仍有活动 Run`);
+      assertSessionProfileCompatible(existing, profile);
       revision = existing.revision;
     } catch (error: unknown) {
       if (error instanceof Error && "code" in error && error.code === "not_found") {
         const created = await store.create(
-          { sessionId, recordId: `session:${sessionId}`, createdAt: now },
+          {
+            schemaVersion: 2,
+            sessionId,
+            recordId: `session:${sessionId}`,
+            createdAt: now,
+            lineage: ROOT_SESSION_LINEAGE,
+            profile,
+          },
           { signal },
         );
         revision = created.revision;

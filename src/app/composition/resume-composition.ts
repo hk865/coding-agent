@@ -29,6 +29,7 @@ import { createReadToolDefinition } from "../../tools/builtin/read/read-tool.js"
 import { createShellToolDefinition } from "../../tools/builtin/shell/shell-tool.js";
 import { ToolDispatcher } from "../../tools/dispatcher/tool-dispatcher.js";
 import { RegistryToolBatchPolicy, ToolRegistry } from "../../tools/registry/tool-registry.js";
+import { assertSessionProfileCompatible, createAgentProfileIdentity } from "./agent-profile.js";
 import type { AppConfig } from "./app-config.js";
 import type { SecretSource } from "./composition-root.js";
 
@@ -108,6 +109,7 @@ export async function resumeCodingAgent(input: Readonly<ResumeAppInput>): Promis
     sandboxProfileVersion: processProfile.version,
     baseConfigDigest: checksum(input.config),
   };
+  const profile = createAgentProfileIdentity(input.config, snapshot);
   const currentWorkspace = {
     identity: workspace.identity,
     revision: await workspace.revision(),
@@ -115,6 +117,8 @@ export async function resumeCodingAgent(input: Readonly<ResumeAppInput>): Promis
   };
   const store = await SqliteStores.open(path.resolve(input.config.storage.databasePath));
   try {
+    const header = await store.get(input.sessionId, { signal });
+    assertSessionProfileCompatible(header, profile);
     const records = await readRecords(store, input.sessionId, signal);
     const turnRecord = records.findLast((record) => record.recordType === "turn.started");
     if (!turnRecord || turnRecord.recordType !== "turn.started") {

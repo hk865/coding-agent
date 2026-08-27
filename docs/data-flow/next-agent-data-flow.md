@@ -1,8 +1,10 @@
 # 下一阶段 Agent 数据流
 
 ```yaml
-status: proposed
+status: active
 baseline_commit: a91cde6
+completed_stage: A1
+next_stage: A2
 updated: 2026-08-27
 ```
 
@@ -56,6 +58,10 @@ sink 已经避免了这个问题；下一阶段 Inbox 和扩展事实也必须�
 3. 重建 RunState、Inbox 状态和 Context Projection；
 4. 对“已开始但结果未知”的外部操作做 reconciliation，不能猜成功；
 5. 只有恢复到稳定边界后，Driver 才领取下一条输入。
+
+其中第 1、2 步和 RunState 重建已经在 A1 落地：v2
+Profile 不匹配会在运行前失败；旧 v1 继续由 Turn 环境快照校验；未知且声明可忽略的扩展事实不会改变 RunState。Inbox 状态和独立 Context
+Projection 分别由 A2、A3 补齐。
 
 ## 压缩不是删除
 

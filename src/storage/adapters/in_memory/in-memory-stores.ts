@@ -30,6 +30,7 @@ import {
   assertSessionRecordChecksum,
   canonicalJson,
   computeSessionRecordChecksum,
+  createSessionArtifacts,
   sessionHeaderSchema,
   sessionRecordDraftSchema,
   sessionRecordSchema,
@@ -90,28 +91,7 @@ export class InMemoryStores implements SessionStorePort, CheckpointStorePort {
       throw new StoreError("already_exists", "Session 已存在");
     if (this.#recordsById.has(input.recordId))
       throw new StoreError("already_exists", "recordId 已存在");
-    const content = {
-      recordId: input.recordId,
-      sessionId: input.sessionId,
-      position: 1,
-      recordType: "session.created" as const,
-      schemaVersion: 1 as const,
-      recordedAt: input.createdAt,
-      payload: { sessionId: input.sessionId, createdAt: input.createdAt },
-    };
-    const record = sessionRecordSchema.parse({
-      ...content,
-      checksum: computeSessionRecordChecksum(content),
-    });
-    const header = sessionHeaderSchema.parse({
-      schemaVersion: 1,
-      sessionId: input.sessionId,
-      createdAt: input.createdAt,
-      updatedAt: input.createdAt,
-      revision: 1,
-      activeRunId: null,
-      activeTurnId: null,
-    });
+    const { record, header } = createSessionArtifacts(input);
     cancelled(options);
     this.#sessions.set(input.sessionId, { header, records: [record] });
     this.#recordsById.set(input.recordId, record);

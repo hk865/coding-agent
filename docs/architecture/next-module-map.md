@@ -1,8 +1,10 @@
 # 下一阶段模块图
 
 ```yaml
-status: proposed
+status: active
 baseline_commit: a91cde6
+completed_stage: A1
+next_stage: A2
 updated: 2026-08-27
 ```
 
@@ -124,3 +126,21 @@ src/
 ```
 
 这是目标边界，不要求一次搬目录。先新增接口和兼容层，再小步迁移；避免为了“看起来整齐”制造无功能收益的大规模重命名。
+
+## 当前落点（A1）
+
+目标图没有被一次性搭空架子。A1 只落了下一阶段真正依赖的地基：
+
+```text
+src/core/ports/session_store/
+  session-store-port.ts       # v1/v2、lineage、Profile identity、extension.fact
+  session-projection.ts       # Core 投影跳过未知可忽略事实
+src/app/composition/
+  agent-profile.ts            # 生成并核对生产 Profile 身份
+src/storage/adapters/
+  in_memory/                  # 同一 Session v1/v2 契约
+  sqlite/                     # database schema v1 -> v2 原位迁移
+```
+
+`AgentDriver` 和 durable `Inbox`
+尚未伪造接口，它们是 A2 的下一次实际改造。这样每个阶段都由真实使用路径和 contract 测试牵引。

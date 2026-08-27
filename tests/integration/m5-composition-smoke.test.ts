@@ -102,8 +102,31 @@ describe("M5 Composition smoke", () => {
     expect(requestedSecrets).toEqual(["DEEPSEEK_API_KEY"]);
     expect(output).toBe("M5 replay ok");
 
+    const changedConfig = appConfigSchema.parse({
+      ...config,
+      runtime: { ...config.runtime, maxToolCalls: config.runtime.maxToolCalls + 1 },
+    });
+    await expect(
+      runCodingAgent({
+        config: changedConfig,
+        workspaceRoot: workspace.root,
+        input: "不应在 Profile 漂移后开始新 Turn",
+        sessionId: "session-m5-smoke",
+        providerRegistry: registry,
+        secretSource: { get: () => "fixture-secret-never-persist" },
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
     const store = await SqliteStores.open(databasePath);
     try {
+      const header = await store.get("session-m5-smoke", {
+        signal: new AbortController().signal,
+      });
+      expect(header).toMatchObject({
+        schemaVersion: 2,
+        lineage: { kind: "root", delegationDepth: 0 },
+        profile: { profileId: "coding-agent.default", profileVersion: "a1-v1" },
+      });
       const page = await store.read("session-m5-smoke", 0, 100, {
         signal: new AbortController().signal,
       });

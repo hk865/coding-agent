@@ -127,7 +127,16 @@ export {
   checkpointSchema,
   createCheckpoint,
 } from "./core/ports/checkpoint_store/checkpoint-store-port.js";
-export { sessionRecordSchema, StoreError } from "./core/ports/session_store/session-store-port.js";
+export {
+  agentProfileIdentitySchema,
+  createSessionInputSchema,
+  extensionFactEnvelopeSchema,
+  sessionHeaderSchema,
+  sessionLineageSchema,
+  sessionRecordDraftSchema,
+  sessionRecordSchema,
+  StoreError,
+} from "./core/ports/session_store/session-store-port.js";
 export { StructuredEventLogger } from "./observability/logging/structured-event-logger.js";
 export {
   ApprovalCoordinator,
@@ -162,6 +171,11 @@ export type {
   CheckpointStorePort,
 } from "./core/ports/checkpoint_store/checkpoint-store-port.js";
 export type {
+  AgentProfileIdentity,
+  CreateSessionInput,
+  ExtensionFactEnvelope,
+  SessionHeader,
+  SessionLineage,
   SessionRecord,
   SessionRecordDraft,
   SessionStorePort,

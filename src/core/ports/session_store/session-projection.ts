@@ -26,17 +26,35 @@ export function replaySessionRecords(records: readonly SessionRecord[]): RunStat
       } catch {
         throw new StoreError("corrupt", "Session AgentEvent 无法重放", record.position - 1);
       }
+    } else if (record.recordType === "extension.fact" && !record.payload.ignorable) {
+      throw new StoreError(
+        "version_unsupported",
+        `扩展事实 ${record.payload.namespace}/${record.payload.factType}@${record.payload.schemaVersion} 需要已安装 consumer`,
+        record.position - 1,
+      );
     }
   }
   return state;
 }
 
-export function applySessionDraft(state: RunState | null, draft: SessionRecordDraft): RunState {
+export function applySessionDraft(
+  state: RunState | null,
+  draft: SessionRecordDraft,
+): RunState | null {
   if (draft.recordType === "turn.started") {
     if (state && !isTerminalRunStatus(state.status)) {
       throw new StoreError("invalid_record", "Session 已有未终止 Turn");
     }
     return createInitialRunState(draft.payload.run);
+  }
+  if (draft.recordType === "extension.fact") {
+    if (!draft.payload.ignorable) {
+      throw new StoreError(
+        "version_unsupported",
+        `扩展事实 ${draft.payload.namespace}/${draft.payload.factType}@${draft.payload.schemaVersion} 需要已安装 consumer`,
+      );
+    }
+    return state;
   }
   if (!state) throw new StoreError("invalid_record", "agent.event 缺少当前 Turn");
   try {

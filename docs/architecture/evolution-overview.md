@@ -1,9 +1,11 @@
 # Agent Core 演进总览
 
 ```yaml
-status: proposed
+status: active
 baseline_commit: a91cde6
 proposal_branch: codex/agent-core-evolution
+completed_stage: A1
+next_stage: A2
 updated: 2026-08-27
 audience: 第一次接触 Agent 架构的读者、短上下文模型、实现者
 ```
@@ -62,6 +64,23 @@ flowchart TB
 因此，`RuntimeRunner`
 应继续保持小而严格。通用能力应加在它的外面，不能把热插拔、队列、多 Agent 和所有产品逻辑都塞进循环。
 
+## A1 已经落地什么
+
+第一步改造已经从提案变成代码：
+
+- 新生产会话创建为 Session v2，Header 和首条 `session.created`
+  同时固化 lineage 与 Profile 身份摘要；
+- root、fork、delegated 三种 lineage 有互斥约束，父位置还绑定父记录校验和；
+- `extension.fact` 使用 namespace、fact type、版本、可忽略策略、模型可见性和 JSON data 信封；
+- 当前 Core 不认识扩展业务语义：`ignorable: true` 可安全跳过且不改变 RunState，`false`
+  在没有 consumer 时明确拒绝；
+- SQLite database schema 从 v1 原位加列到 v2，不改写旧 Session 行或旧记录 JSON；
+- 旧调用省略版本仍创建 v1，v1 数据继续读取、追加和恢复；
+- 新会话在开始新 Turn 或恢复前核对 Profile，防止模型、工具、安全策略等装配静默漂移。
+
+A1 只固化 Profile 身份，不等于完整 ExtensionHost。Profile 内容快照、扩展安装/释放和贡献收集仍属于 A5。详细字段与迁移规则见
+[A1 Session v2 契约](../interfaces/a1-session-v2.md)。
+
 ## 三类“真相”
 
 ### 1. 事实：Session Log
@@ -95,15 +114,15 @@ Outbox 的“先提交、后通知”。它们不是时髦词，而是在回答�
 
 ## 分阶段改造
 
-| 阶段 | 内容                                              | 验收标准                                             |
-| ---- | ------------------------------------------------- | ---------------------------------------------------- |
-| A0   | 文档和状态校正，本提案落地                        | 文档与代码、测试一致                                 |
-| A1   | Session v2：lineage、profile digest、扩展事实信封 | v1 可迁移；未知可忽略事件不破坏恢复                  |
-| A2   | AgentDriver + durable Inbox                       | 重启后消息不丢；重复输入不重复执行；单会话无并发竞态 |
-| A3   | `ContentBlock` + Context Projection               | 文本/图片/文件引用可穷尽映射；模型所见都有日志依据   |
-| A4   | append-only Compaction + Fork                     | 原记录保留；摘要带来源区间；可从历史边界派生新会话   |
-| A5   | Immutable Profile + ExtensionHost 生命周期        | 注册可撤销；同一 Profile 重放结果不因热更新漂移      |
-| A6   | AgentSupervisor / Subagent                        | 子 Agent 独立状态；取消、深度和预算可向下传播        |
+| 阶段 | 内容                                              | 状态     | 验收标准                                             |
+| ---- | ------------------------------------------------- | -------- | ---------------------------------------------------- |
+| A0   | 文档和状态校正，本提案落地                        | 已完成   | 文档与代码、测试一致                                 |
+| A1   | Session v2：lineage、profile digest、扩展事实信封 | 已完成   | v1 可迁移；未知可忽略事件不破坏恢复                  |
+| A2   | AgentDriver + durable Inbox                       | 下一阶段 | 重启后消息不丢；重复输入不重复执行；单会话无并发竞态 |
+| A3   | `ContentBlock` + Context Projection               | 尚未开始 | 文本/图片/文件引用可穷尽映射；模型所见都有日志依据   |
+| A4   | append-only Compaction + Fork                     | 尚未开始 | 原记录保留；摘要带来源区间；可从历史边界派生新会话   |
+| A5   | Immutable Profile + ExtensionHost 生命周期        | 尚未开始 | 注册可撤销；同一 Profile 重放结果不因热更新漂移      |
+| A6   | AgentSupervisor / Subagent                        | 尚未开始 | 子 Agent 独立状态；取消、深度和预算可向下传播        |
 
 每阶段都先增加 schema/contract 测试，再接生产 Adapter；旧版本读取和失败恢复必须属于验收，而不是最后补做。
 
