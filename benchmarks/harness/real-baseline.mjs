@@ -228,7 +228,11 @@ export async function runRealBaseline(options) {
                 evaluation.agentCommand.stderr || evaluation.command.stderr || evaluation.status,
             },
       agent: { revision, runnerMode: "agent" },
-      model: { provider: options.provider, model: options.model },
+      model: {
+        provider: options.provider,
+        model: options.model,
+        options: options.provider === "deepseek" ? { thinking: "disabled" } : {},
+      },
       promptVersion: "m6-canary-v1",
       taskLimits: {
         timeoutSeconds: loaded.task.timeoutSeconds,

@@ -13,12 +13,31 @@ import type { ToolCall } from "../../core/ports/tool_executor/tool-executor-port
 import type { ToolDefinition } from "../schemas/tool-schemas.js";
 import { validateToolDefinition } from "../schemas/tool-schemas.js";
 
+const OMITTED_MODEL_SCHEMA_KEYS = new Set(["$schema", "minLength", "maxLength"]);
+
+function compatibleModelSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => compatibleModelSchema(item));
+  if (!value || typeof value !== "object") return value;
+  const result: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (OMITTED_MODEL_SCHEMA_KEYS.has(key)) continue;
+    if (key === "oneOf") {
+      result["anyOf"] = compatibleModelSchema(child);
+    } else if (key === "const") {
+      result["enum"] = [compatibleModelSchema(child)];
+    } else {
+      result[key] = compatibleModelSchema(child);
+    }
+  }
+  return result;
+}
+
 function schemaForModel(definition: ToolDefinition): ModelToolSpec["inputSchema"] {
   const candidate = definition.inputSchema as unknown as { toJSONSchema?: () => unknown };
   if (typeof candidate.toJSONSchema === "function") {
     const generated = candidate.toJSONSchema();
     if (generated && typeof generated === "object" && !Array.isArray(generated)) {
-      return generated as ModelToolSpec["inputSchema"];
+      return compatibleModelSchema(generated) as ModelToolSpec["inputSchema"];
     }
   }
   return { type: "object", additionalProperties: false };

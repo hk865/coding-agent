@@ -116,7 +116,7 @@ export class DeepSeekModelClient implements ModelClientPort {
     if (options.reasoningEffort && options.thinking !== "enabled") {
       throw new Error("reasoningEffort 只可在 thinking=enabled 时使用");
     }
-    this.#options = options;
+    this.#options = { ...options, thinking: options.thinking ?? "disabled" };
   }
 
   async *stream(
@@ -125,6 +125,17 @@ export class DeepSeekModelClient implements ModelClientPort {
   ): AsyncIterable<ModelEvent> {
     const request = modelRequestSchema.parse(candidate);
     const event = createEventFactory(request.requestId);
+    if (this.#options.thinking === "enabled" && request.tools.length > 0) {
+      yield event({
+        type: "error",
+        error: {
+          code: "thinking_tool_calls_unsupported",
+          message: "当前 Context 协议不保留 reasoning_content，拒绝 DeepSeek thinking + ToolCall",
+          retryable: false,
+        },
+      });
+      return;
+    }
     const body: Record<string, unknown> = {
       model: this.#options.model,
       messages: mapMessages(request),

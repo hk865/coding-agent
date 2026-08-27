@@ -8,6 +8,9 @@ M5 已加入显式多 Provider App 边界：静态 `ProviderRegistry` 首批注�
 - OpenAI Adapter 使用官方 SDK 的 Responses API、`stream: true`、`store: false`；
 - DeepSeek Adapter 使用官方 OpenAI-compatible Chat Completions endpoint，支持流式文本、Tool
   Calls、usage、截断、取消和错误脱敏；
+- DeepSeek 默认显式使用 `thinking=disabled`。当前 Core Context 不保存厂商专属的
+  `reasoning_content`，所以 `thinking=enabled` 与 ToolCall 同时出现时在联网前 fail
+  closed，避免恢复时丢失协议状态；
 - 两家 Adapter 都实现既有 `ModelClientPort`，Provider SDK 类型不会进入 Core；
 - API key 只从当前选择 Provider 的秘密来源取得，不进入 argv、JSON 配置、Session 或 trace。
 
@@ -16,6 +19,10 @@ M5 已加入显式多 Provider App 边界：静态 `ProviderRegistry` 首批注�
 生产 Composition 明确注册并冻结 `read`、`edit`、`shell`。`read` 只读允许；`edit` 和 `shell`
 仍经过 Permission 与 Approval；缺少 bubblewrap 时 `shell` fail closed。测试用 `external_echo`
 证明外部 Tool 可只通过 Registry 接入，不修改 Runtime Loop。
+
+Registry 发给模型的 JSON Schema 会归一到跨 Provider 的保守子集（例如 `oneOf → anyOf`、
+`const → enum`，移除厂商不普遍支持的字符串长度关键字）。这只影响模型协议；工具执行前仍由原始 Zod
+schema 严格校验，因此不会放宽实际权限或输入边界。
 
 ## Skill 与 Memory
 

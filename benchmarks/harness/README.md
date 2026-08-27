@@ -14,7 +14,8 @@ Harness 固定输出以下失败类别：
 
 每个 trial 保存 `result.json`、`trace.jsonl`、`diff.json` 和 `evaluator.log`。`agent-runner.mjs`
 是真实模型 baseline 的受控入口：从环境读取所选 Provider 的密钥，使用 M5
-Composition、静态单次审批和真实 sandbox；调用前仍必须满足可追溯 commit 与 bubblewrap 环境门禁。
+Composition、静态单次审批和真实 sandbox；调用前仍必须满足可追溯 commit 与 bubblewrap 环境门禁。结果同时保存有效的 Provider/model/options；DeepSeek
+baseline 固定并记录 `thinking=disabled`，避免厂商默认值变化破坏可重复性。
 
 真实 baseline 会检查 Git tracked/untracked 状态；工作区不干净时拒绝运行。bubblewrap 优先读取绝对路径
 `CODING_AGENT_BWRAP_PATH`，否则使用 `/usr/bin/bwrap`，不存在或不可执行时记录 `environment_error`。

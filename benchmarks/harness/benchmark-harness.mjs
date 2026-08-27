@@ -379,7 +379,7 @@ export async function runReplayBaseline(options) {
               message: evaluation.command.stderr || evaluation.status,
             },
       agent: { revision, runnerMode: options.mode },
-      model: { provider: "deterministic-replay", model: options.mode },
+      model: { provider: "deterministic-replay", model: options.mode, options: {} },
       promptVersion: "m6-canary-v1",
       taskLimits: {
         timeoutSeconds: loaded.task.timeoutSeconds,

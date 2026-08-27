@@ -134,7 +134,32 @@ describe("M5 Provider contracts", () => {
       stream: true,
       stream_options: { include_usage: true },
       max_tokens: 128,
+      thinking: { type: "disabled" },
     });
+  });
+
+  it("DeepSeek thinking + ToolCall 在 Context 尚不保留 reasoning_content 时 fail closed", async () => {
+    let transportCalls = 0;
+    const client = new DeepSeekModelClient({
+      model: "deepseek-v4-flash",
+      thinking: "enabled",
+      transport: {
+        async create() {
+          transportCalls += 1;
+          return fixture([]);
+        },
+      },
+    });
+
+    const events = await collect(client.stream(request, { signal: new AbortController().signal }));
+    expect(transportCalls).toBe(0);
+    expect(validateModelEventSequence(events)).toEqual({ ok: true });
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "error",
+        error: expect.objectContaining({ code: "thinking_tool_calls_unsupported" }),
+      }),
+    ]);
   });
 
   it("Registry 固定 openai/deepseek，未知 Provider fail closed", () => {

@@ -48,4 +48,47 @@ describe("M5 external Tool boundary", () => {
       ),
     ).toMatchObject({ status: "success", output: [{ kind: "text", text: "echo-ok" }] });
   });
+
+  it("模型工具 schema 使用跨 Provider 的保守子集，运行时仍由原 Zod schema 严格校验", () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "schema_probe",
+      description: "schema compatibility probe",
+      inputSchema: z.discriminatedUnion("mode", [
+        z.object({ mode: z.literal("create"), text: z.string().min(2) }).strict(),
+        z.object({ mode: z.literal("delete"), force: z.boolean() }).strict(),
+      ]),
+      effectClass: "workspace_write",
+      requiredCapabilities: ["workspace_write"],
+      defaultTimeoutMs: 1_000,
+      outputLimitBytes: 1_024,
+      independentReadOnly: false,
+      handler: {
+        async execute(call) {
+          return {
+            schemaVersion: 1,
+            callId: call.callId,
+            status: "success",
+            output: [],
+            effects: {
+              sideEffect: "none",
+              changedPaths: [],
+              workspaceRevision: null,
+              artifactRefs: [],
+            },
+          };
+        },
+      },
+      summarize: () => ({ paths: [], cwd: null, commandPreview: null }),
+    });
+
+    const [spec] = registry.freeze(["schema_probe"]).modelToolSpecs();
+    const encoded = JSON.stringify(spec?.inputSchema);
+    expect(encoded).toContain('"anyOf"');
+    expect(encoded).toContain('"enum"');
+    expect(encoded).not.toContain('"$schema"');
+    expect(encoded).not.toContain('"oneOf"');
+    expect(encoded).not.toContain('"const"');
+    expect(encoded).not.toContain('"minLength"');
+  });
 });

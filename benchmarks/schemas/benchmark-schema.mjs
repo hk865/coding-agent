@@ -92,7 +92,15 @@ export const benchmarkTrialResultSchema = z
         runnerMode: z.enum(["base", "oracle", "near-miss", "agent"]),
       })
       .strict(),
-    model: z.object({ provider: z.string().min(1), model: z.string().min(1) }).strict(),
+    model: z
+      .object({
+        provider: z.string().min(1),
+        model: z.string().min(1),
+        options: z
+          .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
+          .optional(),
+      })
+      .strict(),
     promptVersion: z.string().min(1),
     taskLimits: z
       .object({

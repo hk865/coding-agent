@@ -20,13 +20,16 @@ ToolCall/usage/错误/取消转换；不负责 Runtime 重试、Tool 执行、�
 已实现官方 endpoint 的 Chat Completions/SSE
 Adapter、ToolCall 聚合、usage、错误和取消映射。已有真实纯文本 smoke；无副作用 function
 ToolCall 也已在 M6 候选提交 `f2f8f40` 上由 `deepseek-v4-flash`
-真实通过；函数只生成固定参数，没有执行。
+真实通过；函数只生成固定参数，没有执行。M6 真实 canary 首跑还发现生产工具 schema 与 thinking 状态需要收紧，修复后的正式 baseline 结果另记在 M6 验证记录中。
 
 ## 已实现
 
 - 使用稳定 provider ID `deepseek` 和 `DEEPSEEK_API_KEY`，只连接官方 endpoint。
 - 把 ModelRequest 与 `read`、`edit`、`shell` schema 映射为 Chat Completions messages/function
   tools。
+- 默认显式发送 `thinking=disabled`；在 Context 尚不能保留 `reasoning_content` 时，
+  `thinking=enabled + ToolCall` 联网前 fail closed。
+- 模型侧工具 schema 使用跨 Provider 保守子集；运行时继续使用原始 Zod schema 严格校验。
 - 把文本、ToolCall 参数、usage、finish reason、错误和取消映射为 ModelEvent。
 - 通过共享 ModelClientPort contract、DeepSeek 专属 fixture 和受控人工 smoke。
 
