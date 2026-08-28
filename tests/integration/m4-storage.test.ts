@@ -275,7 +275,7 @@ for (const [name, factory] of [
 }
 
 describe("M4 Recovery", () => {
-  it("ToolStarted 已提交但无结果时只追加一次 result_unknown，绝不重放调用", async () => {
+  it("ToolStarted 已提交但无结果时先追加一次 tool.outcome_unknown 再 run.failed，绝不重放调用", async () => {
     const stores = await inMemory();
     let { revision, state } = await createTurn(stores, run("unknown"));
     for (const value of [
@@ -325,7 +325,33 @@ describe("M4 Recovery", () => {
     const first = await recovery.recover("session-1", options);
     expect(first.action).toBe("side_effect_result_unknown");
     expect(first.state.status).toBe("failed");
-    expect(first.state.toolBatch?.calls[0]?.status).toBe("result_unknown");
+    // toolBatch 在结算时写回 transcript，合成结果对模型可见
+    expect(first.state.toolBatch).toBeNull();
+    const toolResults = first.state.transcript.filter((entry) => entry.kind === "tool_result");
+    expect(toolResults).toHaveLength(1);
+    const recoveredRecords = await stores.read("session-1", 0, 20, options);
+    const reconciled = recoveredRecords.records
+      .filter(
+        (
+          record,
+        ): record is Extract<
+          (typeof recoveredRecords.records)[number],
+          { recordType: "agent.event" }
+        > =>
+          record.recordType === "agent.event" &&
+          (record.payload.event.type === "tool.outcome_unknown" ||
+            record.payload.event.type === "run.failed"),
+      )
+      .map((record) => record.payload.event);
+    expect(reconciled.map((item) => item.type)).toEqual(["tool.outcome_unknown", "run.failed"]);
+    const synthesizedResult = toolResults[0]!;
+    expect(synthesizedResult.kind).toBe("tool_result");
+    if (synthesizedResult.kind === "tool_result") {
+      expect(synthesizedResult.result.status).toBe("error");
+      if (synthesizedResult.result.status === "error") {
+        expect(synthesizedResult.result.error.code).toBe("outcome_unknown");
+      }
+    }
     const second = await recovery.recover("session-1", options);
     expect(second.action).toBe("terminal");
     const records = await stores.read("session-1", 0, 20, options);

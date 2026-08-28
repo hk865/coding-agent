@@ -210,4 +210,133 @@ describe("M1-01 AgentEvent transition contract", () => {
       agentEventSchema.safeParse({ type: "vendor.completed", meta: meta(1), payload: {} }).success,
     ).toBe(false);
   });
+
+  it("tool.cancelled 只接受真实的 cancelled ToolResult，tool.outcome_unknown 只接受 outcome_unknown 合成结果", () => {
+    const cancelled = {
+      schemaVersion: 1,
+      callId: "call-1",
+      status: "cancelled" as const,
+      reason: "user_interrupt",
+      output: [{ kind: "text" as const, text: "已有输出" }],
+      effects: {
+        sideEffect: "possible" as const,
+        changedPaths: ["a.txt"],
+        workspaceRevision: null,
+        artifactRefs: [],
+      },
+    };
+    const errorResult = {
+      schemaVersion: 1,
+      callId: "call-1",
+      status: "error" as const,
+      error: { code: "outcome_unknown" as const, message: "结果未知", retryable: false },
+      output: [{ kind: "text" as const, text: "可能已产生副作用" }],
+      effects: {
+        sideEffect: "possible" as const,
+        changedPaths: [],
+        workspaceRevision: null,
+        artifactRefs: [],
+      },
+    };
+    // tool.cancelled 必须携带 cancelled result，且 callId 一致
+    expect(
+      agentEventSchema.safeParse({
+        type: "tool.cancelled",
+        meta: meta(2, "event-cancel"),
+        payload: { callId: "call-1", result: cancelled },
+      }).success,
+    ).toBe(true);
+    expect(
+      agentEventSchema.safeParse({
+        type: "tool.cancelled",
+        meta: meta(2, "event-cancel"),
+        payload: { callId: "call-1", result: errorResult },
+      }).success,
+    ).toBe(false);
+    expect(
+      agentEventSchema.safeParse({
+        type: "tool.cancelled",
+        meta: meta(2, "event-cancel"),
+        payload: { callId: "call-other", result: cancelled },
+      }).success,
+    ).toBe(false);
+    // tool.outcome_unknown 必须包含审计字段与 outcome_unknown 合成结果
+    expect(
+      agentEventSchema.safeParse({
+        type: "tool.outcome_unknown",
+        meta: meta(2, "event-unknown"),
+        payload: {
+          callId: "call-1",
+          toolName: "edit",
+          effectClass: "workspace_write",
+          reason: "process_interrupted",
+          retryPolicy: "never_automatic",
+          recordedCallEventId: "event-tool-started",
+          synthesizedResult: errorResult,
+        },
+      }).success,
+    ).toBe(true);
+    // 合成结果不是 outcome_unknown 错误码时必须拒绝
+    expect(
+      agentEventSchema.safeParse({
+        type: "tool.outcome_unknown",
+        meta: meta(2, "event-unknown"),
+        payload: {
+          callId: "call-1",
+          toolName: "edit",
+          effectClass: "workspace_write",
+          reason: "process_interrupted",
+          retryPolicy: "never_automatic",
+          recordedCallEventId: "event-tool-started",
+          synthesizedResult: {
+            ...errorResult,
+            error: { code: "execution_failed", message: "x", retryable: false },
+          },
+        },
+      }).success,
+    ).toBe(false);
+    // 禁止自动重试是硬契约：retryPolicy=never_automatic 时合成结果 retryable 必须为 false
+    expect(
+      agentEventSchema.safeParse({
+        type: "tool.outcome_unknown",
+        meta: meta(2, "event-unknown"),
+        payload: {
+          callId: "call-1",
+          toolName: "edit",
+          effectClass: "workspace_write",
+          reason: "process_interrupted",
+          retryPolicy: "never_automatic",
+          recordedCallEventId: "event-tool-started",
+          synthesizedResult: {
+            ...errorResult,
+            error: { code: "outcome_unknown", message: "结果未知", retryable: true },
+          },
+        },
+      }).success,
+    ).toBe(false);
+    // effects.sideEffect 必须与 effectClass 一致（read_only → none，其余 → possible）
+    expect(
+      agentEventSchema.safeParse({
+        type: "tool.outcome_unknown",
+        meta: meta(2, "event-unknown"),
+        payload: {
+          callId: "call-1",
+          toolName: "read",
+          effectClass: "read_only",
+          reason: "process_interrupted",
+          retryPolicy: "never_automatic",
+          recordedCallEventId: "event-tool-started",
+          synthesizedResult: {
+            ...errorResult,
+            effects: {
+              sideEffect: "possible",
+              changedPaths: [],
+              workspaceRevision: null,
+              artifactRefs: [],
+            },
+          },
+        },
+      }).success,
+    ).toBe(false);
+  });
 });

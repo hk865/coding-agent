@@ -191,4 +191,133 @@ describe("WebEventProjectionSink", () => {
       elapsedMs: 200_540,
     });
   });
+
+  it("正常取消投影为 cancelled 工具条目，携带真实取消原因、输出与 effects", async () => {
+    const projections: WebRuntimeProjection[] = [];
+    const sink = new WebEventProjectionSink({
+      contextWindowTokens: 1_000_000,
+      maxModelRequests: 64,
+      maxToolCalls: 128,
+      emit: (projection) => projections.push(projection),
+    });
+    const call = {
+      schemaVersion: 1 as const,
+      callId: "call-shell",
+      name: "shell",
+      arguments: { command: "npm test" },
+    };
+    await sink.publish(
+      agentEventSchema.parse({
+        type: "tool.started",
+        meta: meta(1, 100),
+        payload: { call },
+      }),
+      { signal: controller.signal },
+    );
+    await sink.publish(
+      agentEventSchema.parse({
+        type: "tool.cancelled",
+        meta: meta(2, 500),
+        payload: {
+          callId: "call-shell",
+          result: {
+            schemaVersion: 1,
+            callId: "call-shell",
+            status: "cancelled",
+            reason: "user_interrupt",
+            output: [{ kind: "text", text: "已有部分输出" }],
+            effects: {
+              sideEffect: "possible",
+              changedPaths: ["a.txt"],
+              workspaceRevision: "revision-x",
+              artifactRefs: [],
+            },
+          },
+        },
+      }),
+      { signal: controller.signal },
+    );
+
+    const projection = projections.at(-1)!;
+    expect(projection).toMatchObject({
+      kind: "tool",
+      status: "cancelled",
+      title: "shell 已取消",
+      callId: "call-shell",
+      toolName: "shell",
+      durationMs: 400,
+    });
+    expect(projection.summary).toContain("user_interrupt");
+    expect(projection.output).toContain("已有部分输出");
+    expect(projection.output).toContain("cancelled: user_interrupt");
+  });
+
+  it("结果未知投影为 outcome_unknown 工具条目，明确禁止自动重试", async () => {
+    const projections: WebRuntimeProjection[] = [];
+    const sink = new WebEventProjectionSink({
+      contextWindowTokens: 1_000_000,
+      maxModelRequests: 64,
+      maxToolCalls: 128,
+      emit: (projection) => projections.push(projection),
+    });
+    const call = {
+      schemaVersion: 1 as const,
+      callId: "call-edit",
+      name: "edit",
+      arguments: { mode: "create", path: "a.txt", newText: "x" },
+    };
+    await sink.publish(
+      agentEventSchema.parse({
+        type: "tool.started",
+        meta: meta(1, 100),
+        payload: { call },
+      }),
+      { signal: controller.signal },
+    );
+    await sink.publish(
+      agentEventSchema.parse({
+        type: "tool.outcome_unknown",
+        meta: meta(2, 900),
+        payload: {
+          callId: "call-edit",
+          toolName: "edit",
+          effectClass: "workspace_write",
+          reason: "process_interrupted",
+          retryPolicy: "never_automatic",
+          recordedCallEventId: "event-tool-started",
+          synthesizedResult: {
+            schemaVersion: 1,
+            callId: "call-edit",
+            status: "error",
+            error: {
+              code: "outcome_unknown",
+              message: "工具 edit 的结果未知",
+              retryable: false,
+            },
+            output: [{ kind: "text", text: "可能已经产生副作用；系统不能自动重试" }],
+            effects: {
+              sideEffect: "possible",
+              changedPaths: [],
+              workspaceRevision: null,
+              artifactRefs: [],
+            },
+          },
+        },
+      }),
+      { signal: controller.signal },
+    );
+
+    const projection = projections.at(-1)!;
+    expect(projection).toMatchObject({
+      kind: "tool",
+      status: "outcome_unknown",
+      title: "edit 结果未知",
+      callId: "call-edit",
+      toolName: "edit",
+      durationMs: 800,
+    });
+    expect(projection.summary).toContain("禁止自动重试");
+    expect(projection.output).toContain("outcome_unknown");
+    expect(projection.output).toContain("不能自动重试");
+  });
 });

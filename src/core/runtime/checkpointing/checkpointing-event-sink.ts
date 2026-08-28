@@ -33,6 +33,8 @@ const CHECKPOINT_BOUNDARIES = new Set([
   "assistant.message_completed",
   "tool.completed",
   "tool.failed",
+  "tool.cancelled",
+  "tool.outcome_unknown",
   "model.request_failed",
   "run.paused",
   "run.completed",
@@ -69,10 +71,14 @@ export class CheckpointingEventSink implements EventSinkPort {
     options: Parameters<EventSinkPort["publish"]>[1],
   ): Promise<void> {
     this.#state = reduceRunState(this.#state, event);
-    if (event.type === "tool.completed" || event.type === "tool.failed") {
+    // 结算事件（含正常取消）都可能携带部分写入后的 workspace revision；
+    // 必须纳入版本推进，否则恢复时会把 Agent 在取消前产生的修改误判为外部并发变更。
+    if (
+      event.type === "tool.completed" ||
+      event.type === "tool.failed" ||
+      event.type === "tool.cancelled"
+    ) {
       const revision = event.payload.result.effects.workspaceRevision;
-      // 工具副作用成功落盘后，checkpoint 必须记录新的 workspace 版本，
-      // 否则重启会把 Agent 自己造成的修改误判成外部并发变更。
       if (revision) this.#workspace = { ...this.#workspace, revision };
     }
     if (!CHECKPOINT_BOUNDARIES.has(event.type)) return;

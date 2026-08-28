@@ -42,6 +42,10 @@ export const toolEffectsSchema = z
   })
   .strict();
 
+/** 工具副作用类别：read_only 只读、workspace_write 写工作区、process 运行外部进程/系统操作。 */
+export const toolEffectClassSchema = z.enum(["read_only", "workspace_write", "process"]);
+export type ToolEffectClass = z.infer<typeof toolEffectClassSchema>;
+
 export const toolErrorCodeSchema = z.enum([
   "unknown_tool",
   "invalid_arguments",
@@ -52,6 +56,7 @@ export const toolErrorCodeSchema = z.enum([
   "timeout",
   "protocol_error",
   "hook_blocked",
+  "outcome_unknown",
 ]);
 
 export const toolErrorSchema = z

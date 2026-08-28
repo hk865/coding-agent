@@ -15,6 +15,8 @@ import {
   type RunConfigSnapshot,
 } from "../../core/ports/session_store/session-store-port.js";
 import { RuntimeRunner } from "../../core/runtime/loop/runtime-runner.js";
+import { CheckpointingEventSink } from "../../core/runtime/checkpointing/checkpointing-event-sink.js";
+import { createInitialRunState } from "../../core/runtime/state/run-state.js";
 import type { RunState } from "../../core/runtime/state/run-state.js";
 import type { ProviderRegistry } from "../../model/providers/registry/provider-registry.js";
 import { EmptyMemoryProvider } from "../../memory/providers/empty/empty-memory-provider.js";
@@ -200,6 +202,19 @@ export async function runCodingAgent(input: Readonly<RunAppInput>): Promise<RunA
       { signal },
     );
     const sessionSink = await SessionEventSink.connect(store, sessionId, { signal });
+    // 生产事件链：required Session 屏障 + best-effort checkpoint（工具边界派生快照，
+    // 供崩溃恢复加速与「最新 checkpoint revision」承诺）+ observer sinks。
+    const checkpointSink = new CheckpointingEventSink(
+      createInitialRunState(run),
+      store,
+      sessionSink,
+      snapshot,
+      {
+        identity: workspace.identity,
+        revision: workspaceBaseline.revision,
+        reference: "workspace:current",
+      },
+    );
 
     const skillLoader = await FileSkillLoader.create(
       path.resolve(input.config.skills.resourceRoot),
@@ -264,10 +279,11 @@ export async function runCodingAgent(input: Readonly<RunAppInput>): Promise<RunA
     const runner = new RuntimeRunner({
       modelClient,
       toolExecutor: dispatcher,
-      eventSinks: [sessionSink, ...(input.observerEventSinks ?? [])],
+      eventSinks: [checkpointSink, sessionSink, ...(input.observerEventSinks ?? [])],
       limits,
       toolBatchPolicy: new RegistryToolBatchPolicy(tools),
       maxModelRetries: 0,
+      toolEffectClass: (call) => tools.resolve(call.name)?.effectClass ?? "process",
       ...(input.onTextDelta ? { onTextDelta: input.onTextDelta } : {}),
       ...(input.onReasoningDelta ? { onReasoningDelta: input.onReasoningDelta } : {}),
     });

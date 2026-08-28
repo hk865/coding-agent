@@ -11,9 +11,13 @@ import type {
   ToolExecutionOptions,
   ToolResult,
 } from "../../core/ports/tool_executor/tool-executor-port.js";
+import {
+  toolEffectClassSchema,
+  type ToolEffectClass,
+} from "../../core/ports/tool_executor/tool-executor-port.js";
 
-export const toolEffectClassSchema = z.enum(["read_only", "workspace_write", "process"]);
-export type ToolEffectClass = z.infer<typeof toolEffectClassSchema>;
+export { toolEffectClassSchema };
+export type { ToolEffectClass };
 
 export const sandboxCapabilitySchema = z.enum([
   "workspace_read",

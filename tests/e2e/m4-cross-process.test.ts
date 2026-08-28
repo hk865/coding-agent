@@ -192,12 +192,17 @@ async function recoverCrashWindow(databasePath: string, resultPath: string): Pro
   const options = { signal: new AbortController().signal };
   const first = await coordinator.recover("session-cross-process", options);
   const second = await coordinator.recover("session-cross-process", options);
+  // toolBatch 在结算时写回 transcript；合成结果（outcome_unknown）应可被下一轮模型读取。
+  const toolResults = first.state.transcript.filter((entry) => entry.kind === "tool_result");
+  const firstToolResult = toolResults[0]?.kind === "tool_result" ? toolResults[0].result : null;
   await writeFile(
     resultPath,
     JSON.stringify({
       firstAction: first.action,
       firstStatus: first.state.status,
-      toolStatus: first.state.toolBatch?.calls[0]?.status,
+      toolBatchCleared: first.state.toolBatch === null,
+      toolResultStatus: firstToolResult?.status ?? null,
+      toolResultErrorCode: firstToolResult?.status === "error" ? firstToolResult.error.code : null,
       secondAction: second.action,
     }),
     "utf8",
@@ -218,7 +223,7 @@ if (childMode) {
   });
 } else {
   describe("M4 cross-process recovery", () => {
-    it("真实 edit 在 ToolResult 前崩溃时，新进程标记 result_unknown 且不重复副作用", async () => {
+    it("真实 edit 在 ToolResult 前崩溃时，新进程标记 outcome_unknown 且不重复副作用", async () => {
       const temp = await createTempWorkspace("m4-cross-process-");
       try {
         const databasePath = temp.resolve("sessions.sqlite");
@@ -254,7 +259,9 @@ if (childMode) {
         expect(JSON.parse(await readFile(resultPath, "utf8"))).toEqual({
           firstAction: "side_effect_result_unknown",
           firstStatus: "failed",
-          toolStatus: "result_unknown",
+          toolBatchCleared: true,
+          toolResultStatus: "error",
+          toolResultErrorCode: "outcome_unknown",
           secondAction: "terminal",
         });
       } finally {

@@ -88,7 +88,7 @@ export const WEB_PAGE = String.raw`<!doctype html>
       .trace-card summary { min-height:44px; display:grid; grid-template-columns:auto minmax(0,auto) minmax(0,1fr) auto; align-items:center; gap:9px; padding:9px 12px; cursor:pointer; list-style:none; }
       .trace-card summary::-webkit-details-marker { display:none; } .trace-card summary::before { content:">"; color:var(--muted); font:700 11px/1 ui-monospace,monospace; transition:transform .15s; } .trace-card[open] summary::before { transform:rotate(90deg); }
       .trace-title { color:var(--ink); font-weight:800; } .trace-summary { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; } .trace-meta { color:var(--muted); font:11px/1 ui-monospace,monospace; white-space:nowrap; }
-      .trace-card[data-status="started"] summary { background:rgba(23,108,91,.045); } .trace-card[data-status="failed"],.trace-row[data-status="failed"] { border-color:rgba(185,87,80,.4); }
+      .trace-card[data-status="started"] summary { background:rgba(23,108,91,.045); } .trace-card[data-status="failed"],.trace-row[data-status="failed"] { border-color:rgba(185,87,80,.4); } .trace-card[data-status="cancelled"] { border-color:rgba(190,143,64,.45); } .trace-card[data-status="cancelled"] summary { background:rgba(190,143,64,.06); } .trace-card[data-status="outcome_unknown"] { border-color:rgba(120,82,157,.5); } .trace-card[data-status="outcome_unknown"] summary { background:rgba(120,82,157,.08); }
       .reasoning-card { border-color:rgba(95,82,157,.28); } .reasoning-card summary { background:rgba(95,82,157,.055)!important; } .reasoning-card .trace-title { color:#55498d; }
       .config-card { border-color:rgba(23,108,91,.25); }
       .trace-body { border-top:1px solid var(--line); background:#f5f4ed; } .trace-section { padding:12px 14px; } .trace-section + .trace-section { border-top:1px solid var(--line); }
@@ -331,9 +331,16 @@ export const WEB_PAGE = String.raw`<!doctype html>
         let card = toolCards.get(data.callId);
         if (!card) { card = createTraceCard(''); activity.appendChild(card); toolCards.set(data.callId, card); }
         card.dataset.status = data.status; card.querySelector('.trace-title').textContent = data.toolName || data.title; card.querySelector('.trace-summary').textContent = data.summary;
-        card.querySelector('.trace-meta').textContent = data.status === 'started' ? '运行中' : (data.status === 'failed' ? '失败' : '完成') + (data.durationMs === null ? '' : ' · ' + formatDuration(data.durationMs));
+        const toolStatusText =
+          data.status === 'started' ? '运行中'
+          : data.status === 'completed' ? '完成'
+          : data.status === 'failed' ? '失败'
+          : data.status === 'cancelled' ? '已取消'
+          : data.status === 'outcome_unknown' ? '结果未知'
+          : '完成';
+        card.querySelector('.trace-meta').textContent = toolStatusText + (data.durationMs === null ? '' : ' · ' + formatDuration(data.durationMs));
         const body = card.querySelector('.trace-body'); body.innerHTML = ''; if (data.input) body.appendChild(traceSection('INPUT', data.input)); if (data.output) body.appendChild(traceSection('OUTPUT', data.output));
-        if (data.status === 'failed') card.open = true; conversation.scrollTop = conversation.scrollHeight;
+        if (data.status === 'failed' || data.status === 'outcome_unknown') card.open = true; conversation.scrollTop = conversation.scrollHeight;
       }
       function renderRuntimeRow(data) {
         const key = data.kind === 'model' && data.requestId ? data.requestId : data.sourceType + ':' + data.eventSequence;

@@ -139,7 +139,7 @@ graph TB
   H --> I
   I --> J{"恢复阶段判定"}
   J -->|activeModelRequest| K["追加 model.request_failed(process_interrupted)<br/>→ continue_before_model"]
-  J -->|running tool| L["追加 run.failed(side_effect_result_unknown)<br/>→ 终止原 Run，绝不重放副作用"]
+  J -->|running tool| L["为每个 running 调用追加 tool.outcome_unknown<br/>（含模型可见合成结果）→ 再追加 run.failed<br/>→ 终止原 Run，绝不重放副作用"]
   J -->|ready_to_complete| M["追加 run.completed → terminal"]
   J -->|paused| N["paused：等待显式 resume"]
   J -->|terminal| O["terminal：只读返回"]
@@ -213,12 +213,13 @@ Session 事实日志（append-only，position 连续，逐条 SHA-256）
 
 **内部实现**：`runStateSchema` 严格定义字段：`status`（七态）、`transcript`（user_message /
 assistant_message / tool_result 三种条目）、`activeModelRequest`、`toolBatch`（含每条工具调用的
-`pending/running/completed/failed/abandoned/result_unknown`
-六态）、`pause`、`outcome`、`usage`、时间戳与 `lastEventSequence` /
+`pending/running/completed/failed/cancelled/outcome_unknown/abandoned`
+七态，对应工具生命周期矩阵）、`pause`、`outcome`、`usage`、时间戳与 `lastEventSequence` /
 `lastEventId`。`validateRunStateInvariants` 实施结构性不变量：transcript 首条必须是本 Turn 的 user
 message；`activeModelRequest` 与 `toolBatch` 互斥；toolBatch 必须来自最后一条 assistant
-message；各状态的时间/pause/outcome 组合合法；终止态必须 status/outcome 一致；`result_unknown`
-不能伪造 result。`createInitialRunState(run)` 生成 created 初始态。
+message；各状态的时间/pause/outcome 组合合法；终止态必须 status/outcome 一致；
+`completed/failed/cancelled` 必须有 result；`abandoned` 不能伪造 result；`outcome_unknown`
+必须对应已开始（有 effectiveCall）的调用。`createInitialRunState(run)` 生成 created 初始态。
 
 **外部接口**：导出
 `runStateSchema`、`createInitialRunState`、`deriveRunPhase`、`isTerminalRunStatus`、`validateRunStateInvariants`、`runSchema`
@@ -238,9 +239,9 @@ message；各状态的时间/pause/outcome 组合合法；终止态必须 status
 校验转换合法性 → `applyEvent` 按类型构造下一状态副本 → schema 解析 →
 `validateRunStateInvariants`。任何一步失败抛 `ReducerError`（`transition_rejected` /
 `state_invalid`）。`applyEvent`
-是纯函数分支：消息入 transcript、工具批次结算后按 ordinal 排序写回 transcript 并清空批次、终态事件统一经
+是纯函数分支：消息入 transcript、工具批次结算（completed/failed/cancelled/outcome_unknown 都视为已结算）后按 ordinal 排序写回 transcript 并清空批次、终态事件统一经
 `terminalState` 并
-`abandonUnsettledTools`（pending→abandoned、running→result_unknown）、usage 增量累加。
+`abandonUnsettledTools`（pending→abandoned、running→outcome_unknown 兜底）、usage 增量累加。
 
 **外部接口**：`reduceRunState(state, event): RunState`，以及 `ReducerError`。
 
@@ -423,10 +424,13 @@ barrier），其语义由集成/跨进程测试验证。
 4. **环境核对**：仅当将要继续（非终态/非 paused/无 running 工具/非 ready_to_complete）时，把"记录中的 config"与"记录或快照 workspace 经 transcript 中工具结果推进后的 revision"同当前环境做 canonical 比较，不一致抛
    `conflict`。
 5. **中断窗口消解**：`activeModelRequest` 存在 → 追加
-   `model.request_failed(process_interrupted, retryable=true)`（允许新 requestId 重试）；running 工具存在 → 追加
+   `model.request_failed(process_interrupted, retryable=true)`（允许新 requestId 重试）；running 工具存在 → 先为每个 running 调用追加
+   `tool.outcome_unknown`（payload 含
+   `callId/toolName/effectClass/reason/retryPolicy/recordedCallEventId` 与模型可见合成结果），再追加
    `run.failed(side_effect_result_unknown, retryable=false)`（副作用结果不可知，原 Run 不自动重放）；`ready_to_complete`
    → 追加 `run.completed`；否则按阶段给出继续动作。对账事件经 `#appendReconciliation` 用
-   `expectedRevision` 追加，保证只追加一次（重复恢复幂等）。
+   `expectedRevision`
+   追加，保证只追加一次（重复恢复幂等）；同一次 recover 内多个对账事件的 eventId 带序号保证唯一。
 
 **外部接口**：`RecoveryCoordinator.recover(sessionId, options, environment?)` 返回
 `RecoveryResult{sessionId, revision, lastPosition, state, action, checkpointId, reconciledEvent}`；依赖注入
@@ -518,34 +522,34 @@ TOCTOU。revision 只记录不可伪造的 inode/ctime/mtime/size 元数据，�
 
 ## 4 模块间信息流汇总
 
-| 发送方                   | 接收方                          | 接口/通道                                     | 信息内容                                                               | 等级/方向                      |
-| ------------------------ | ------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------ |
-| RuntimeRunner            | EventDeliveryCoordinator        | `commit(state, event)`                        | 候选状态 + AgentEvent                                                  | 同步调用                       |
-| EventDeliveryCoordinator | SessionEventSink                | `publish(event, {signal})`                    | AgentEvent                                                             | required，先于一切 best_effort |
-| EventDeliveryCoordinator | CheckpointingEventSink / 观察者 | `publish(...)`                                | AgentEvent                                                             | best_effort，失败仅诊断        |
-| SessionEventSink         | SqliteStores                    | `append(sessionId, expectedRevision, drafts)` | agent.event 记录（recordId 幂等键）                                    | required，事务内 CAS           |
-| SqliteStores             | SessionEventSink                | append 返回                                   | `{revision, positions}`（已提交游标）                                  | 返回                           |
-| CheckpointingEventSink   | SqliteStores                    | `save(draft)`                                 | CheckpointDraft（游标=lastPosition）                                   | best_effort，单调游标          |
-| SessionEventSink         | CheckpointingEventSink          | `CommittedSessionCursor`                      | `{sessionId, lastPosition}`                                            | 构造注入                       |
-| SqliteStores             | RecoveryCoordinator             | `read/get/listCheckpointCandidates`           | 事实记录页、Session 头、候选快照                                       | 恢复读取                       |
-| RecoveryCoordinator      | SqliteStores                    | `append(...)`（对账事件）                     | `process_interrupted` / `side_effect_result_unknown` / `run.completed` | 幂等追加                       |
-| RecoveryCoordinator      | RuntimeRunner                   | `continueRecovered(state, context)`           | 已对账稳定 RunState + RunnerContextInput                               | 恢复续跑                       |
-| WorkspaceSandbox         | 组合层                          | `captureBaseline()`                           | WorkspaceReference（identity/revision/reference）                      | 启动/恢复时                    |
-| 工具链                   | CheckpointingEventSink          | ToolResult.effects                            | `workspaceRevision`（Agent 确认的写入版本）                            | 事件载荷                       |
-| 恢复器 ↔ 环境            | `RecoveryEnvironment`           | 当前 config + workspace 基线                  | canonical 比对，不一致抛 conflict                                      | 双向核对                       |
+| 发送方                   | 接收方                          | 接口/通道                                     | 信息内容                                                                        | 等级/方向                      |
+| ------------------------ | ------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------ |
+| RuntimeRunner            | EventDeliveryCoordinator        | `commit(state, event)`                        | 候选状态 + AgentEvent                                                           | 同步调用                       |
+| EventDeliveryCoordinator | SessionEventSink                | `publish(event, {signal})`                    | AgentEvent                                                                      | required，先于一切 best_effort |
+| EventDeliveryCoordinator | CheckpointingEventSink / 观察者 | `publish(...)`                                | AgentEvent                                                                      | best_effort，失败仅诊断        |
+| SessionEventSink         | SqliteStores                    | `append(sessionId, expectedRevision, drafts)` | agent.event 记录（recordId 幂等键）                                             | required，事务内 CAS           |
+| SqliteStores             | SessionEventSink                | append 返回                                   | `{revision, positions}`（已提交游标）                                           | 返回                           |
+| CheckpointingEventSink   | SqliteStores                    | `save(draft)`                                 | CheckpointDraft（游标=lastPosition）                                            | best_effort，单调游标          |
+| SessionEventSink         | CheckpointingEventSink          | `CommittedSessionCursor`                      | `{sessionId, lastPosition}`                                                     | 构造注入                       |
+| SqliteStores             | RecoveryCoordinator             | `read/get/listCheckpointCandidates`           | 事实记录页、Session 头、候选快照                                                | 恢复读取                       |
+| RecoveryCoordinator      | SqliteStores                    | `append(...)`（对账事件）                     | `process_interrupted` / `tool.outcome_unknown` + `run.failed` / `run.completed` | 幂等追加                       |
+| RecoveryCoordinator      | RuntimeRunner                   | `continueRecovered(state, context)`           | 已对账稳定 RunState + RunnerContextInput                                        | 恢复续跑                       |
+| WorkspaceSandbox         | 组合层                          | `captureBaseline()`                           | WorkspaceReference（identity/revision/reference）                               | 启动/恢复时                    |
+| 工具链                   | CheckpointingEventSink          | ToolResult.effects                            | `workspaceRevision`（Agent 确认的写入版本）                                     | 事件载荷                       |
+| 恢复器 ↔ 环境            | `RecoveryEnvironment`           | 当前 config + workspace 基线                  | canonical 比对，不一致抛 conflict                                               | 双向核对                       |
 
 ## 5 一致性保证与故障模型
 
 ### 5.1 崩溃窗口消解
 
-| 崩溃发生点                               | 日志中的事实         | 恢复行为                                               | 依据                                                    |
-| ---------------------------------------- | -------------------- | ------------------------------------------------------ | ------------------------------------------------------- |
-| required sink 追加前                     | 无该事件             | 事件未提交，状态不推进，无痕                           | `event-delivery-coordinator.ts:92`                      |
-| 追加成功、ACK 丢失                       | 事件已落盘           | 重试按 recordId 幂等返回既有 position                  | `sqlite-stores.ts:183`、`m4-storage.test.ts`            |
-| 追加后、状态提交前                       | 事件已落盘           | 重放日志重建状态，行为一致                             | 3.5、3.10                                               |
-| `tool.started` 已提交、结果未知          | 工具可能已产生副作用 | 追加 `side_effect_result_unknown`，原 Run 终止，不重放 | `recovery-coordinator.ts:146`、`m4-storage.test.ts:278` |
-| `model.request_started` 已提交、结果未知 | 模型请求无副作用     | 追加一次 `process_interrupted`，新 requestId 重试      | `recovery-coordinator.ts:127`、`m4-storage.test.ts:481` |
-| 稳定边界后（含快照已存）                 | 快照 + 完整事实前缀  | 快照装载 + 尾部重放，恢复后继续闭环                    | `m4-stable-cross-process.test.ts`                       |
+| 崩溃发生点                               | 日志中的事实         | 恢复行为                                                                        | 依据                                                    |
+| ---------------------------------------- | -------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| required sink 追加前                     | 无该事件             | 事件未提交，状态不推进，无痕                                                    | `event-delivery-coordinator.ts:92`                      |
+| 追加成功、ACK 丢失                       | 事件已落盘           | 重试按 recordId 幂等返回既有 position                                           | `sqlite-stores.ts:183`、`m4-storage.test.ts`            |
+| 追加后、状态提交前                       | 事件已落盘           | 重放日志重建状态，行为一致                                                      | 3.5、3.10                                               |
+| `tool.started` 已提交、结果未知          | 工具可能已产生副作用 | 先追加 `tool.outcome_unknown`（含合成结果）再 `run.failed`，原 Run 终止，不重放 | `recovery-coordinator.ts:146`、`m4-storage.test.ts:278` |
+| `model.request_started` 已提交、结果未知 | 模型请求无副作用     | 追加一次 `process_interrupted`，新 requestId 重试                               | `recovery-coordinator.ts:127`、`m4-storage.test.ts:481` |
+| 稳定边界后（含快照已存）                 | 快照 + 完整事实前缀  | 快照装载 + 尾部重放，恢复后继续闭环                                             | `m4-stable-cross-process.test.ts`                       |
 
 ### 5.2 幂等与原子性
 
@@ -559,7 +563,8 @@ TOCTOU。revision 只记录不可伪造的 inode/ctime/mtime/size 元数据，�
 
 ### 5.3 快照安全
 
-- **稳定边界**：仅 10 类无活动操作事件生成快照；`deriveCheckpointResumeMode`
+- **稳定边界**：仅 12 类无活动操作事件生成快照（含 `tool.cancelled` /
+  `tool.outcome_unknown`）；`deriveCheckpointResumeMode`
   拒绝 created/awaiting_model/running-tool 状态。
 - **完整性**：每条记录与每个快照均带 canonical
   SHA-256；恢复时验签，坏快照单条降级为 null 候选，回退更旧快照并 `deleteInvalid`

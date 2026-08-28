@@ -13,8 +13,10 @@ import {
 } from "../../context/types/context-types.js";
 import { modelUsageSchema } from "../../ports/model_client/model-client-port.js";
 import {
+  cancelledToolResultSchema,
   failedToolResultSchema,
   toolCallSchema,
+  toolEffectClassSchema,
   toolResultSchema,
 } from "../../ports/tool_executor/tool-executor-port.js";
 import {
@@ -102,6 +104,54 @@ const toolFailedEventSchema = event(
       message: "tool.failed 的 callId 必须与 result 一致",
     }),
 );
+/**
+ * 正常协作式取消：工具已启动并返回真实的 cancelled ToolResult。
+ * 必须在 run.cancelled 之前持久化，取消结果（原因、已有输出、effects）不得丢弃。
+ */
+const toolCancelledEventSchema = event(
+  "tool.cancelled",
+  z
+    .object({ callId: nonEmptyIdSchema, result: cancelledToolResultSchema })
+    .strict()
+    .refine((value) => value.callId === value.result.callId, {
+      message: "tool.cancelled 的 callId 必须与 result 一致",
+    }),
+);
+/**
+ * 结果未知：工具已开始执行，但 Runtime 因进程中断或强制取消未能取得 ToolResult。
+ * 只允许记录一次；synthesizedResult 是模型可见的合成结果，明确副作用未知且禁止自动重试。
+ */
+const toolOutcomeUnknownEventSchema = event(
+  "tool.outcome_unknown",
+  z
+    .object({
+      callId: nonEmptyIdSchema,
+      toolName: z.string().trim().min(1),
+      effectClass: toolEffectClassSchema,
+      reason: z.enum(["process_interrupted", "cancelled_while_running"]),
+      retryPolicy: z.literal("never_automatic"),
+      recordedCallEventId: nonEmptyIdSchema,
+      synthesizedResult: failedToolResultSchema,
+    })
+    .strict()
+    .refine((value) => value.callId === value.synthesizedResult.callId, {
+      message: "tool.outcome_unknown 的 callId 必须与合成结果一致",
+    })
+    .refine((value) => value.synthesizedResult.error.code === "outcome_unknown", {
+      message: "tool.outcome_unknown 的合成结果必须是 outcome_unknown 错误",
+    })
+    .refine((value) => value.synthesizedResult.error.retryable === false, {
+      message: "outcome_unknown 合成结果禁止自动重试（retryable 必须为 false）",
+    })
+    .refine(
+      (value) =>
+        value.synthesizedResult.effects.sideEffect ===
+        (value.effectClass === "read_only" ? "none" : "possible"),
+      {
+        message: "合成结果 effects.sideEffect 必须与 effectClass 一致",
+      },
+    ),
+);
 const runPausedEventSchema = event("run.paused", z.object({ pause: pauseStateSchema }).strict());
 const runResumedEventSchema = event(
   "run.resumed",
@@ -144,6 +194,8 @@ export const agentEventSchema = z.discriminatedUnion("type", [
   toolStartedEventSchema,
   toolCompletedEventSchema,
   toolFailedEventSchema,
+  toolCancelledEventSchema,
+  toolOutcomeUnknownEventSchema,
   runPausedEventSchema,
   runResumedEventSchema,
   runCompletedEventSchema,
@@ -154,6 +206,10 @@ export const agentEventSchema = z.discriminatedUnion("type", [
 
 export type EventMeta = z.infer<typeof eventMetaSchema>;
 export type AgentEvent = z.infer<typeof agentEventSchema>;
+export type ExtractAgentEventPayload<TType extends AgentEvent["type"]> = Extract<
+  AgentEvent,
+  { type: TType }
+>["payload"];
 
 export type TransitionViolationCode =
   | "schema_invalid"
@@ -258,7 +314,9 @@ export function validateTransition(
       return { ok: true };
     }
     case "tool.completed":
-    case "tool.failed": {
+    case "tool.failed":
+    case "tool.cancelled":
+    case "tool.outcome_unknown": {
       if (phase !== "before_tools") {
         return rejected("phase_disallows_event", "当前阶段不能结算工具");
       }

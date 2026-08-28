@@ -6,3 +6,4 @@ ADR 记录已经接受的工程或架构选择、原因、替代方案和后果�
 - [ADR-0002：M4 使用 Node 内置 SQLite](0002-node-sqlite-session-storage.md)
 - [ADR-0003：M5 多 Provider 基线](0003-multi-provider-baseline.md)
 - [ADR-0004：真流式交付与分层工作区一致性](0004-streaming-and-workspace-consistency.md)
+- [ADR-0005：工具生命周期状态矩阵与取消/中断语义](0005-tool-lifecycle-states.md)

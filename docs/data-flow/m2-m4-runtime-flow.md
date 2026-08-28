@@ -45,7 +45,15 @@ sequenceDiagram
       Runner->>Tool: execute(call, signal)
       Tool-->>Runner: ToolResult + effects
       Runner->>Hook: after_tool（只能改展示 output）
-      Runner->>Sink: tool.completed / tool.failed
+      alt 正常协作取消（父信号已中止）
+        Runner->>Sink: tool.cancelled（真实 ToolResult：原因/输出/effects）
+        Runner->>Sink: run.cancelled（tool.cancelled 落盘成功后才提交）
+      else 强制中断（工具抛错且已 started）
+        Runner->>Sink: tool.outcome_unknown（合成结果，禁止自动重试）
+        Runner->>Sink: run.cancelled
+      else 完成/失败
+        Runner->>Sink: tool.completed / tool.failed
+      end
     else final_answer
       Runner->>Sink: run.completed
     end
@@ -110,7 +118,7 @@ flowchart TD
   Env --> Phase{"恢复阶段"}
   Phase -->|active model| Interrupted["追加 process_interrupted，生成新 requestId"]
   Phase -->|pending tool| FirstRun["首次执行工具"]
-  Phase -->|running tool| Unknown["追加 side_effect_result_unknown，原 Run 终止"]
+  Phase -->|running tool| Unknown["为每个 running 调用追加 tool.outcome_unknown<br/>（含模型可见合成结果），再追加 run.failed<br/>→ 终止原 Run，不自动重放"]
   Phase -->|stable| Continue["RuntimeRunner.continueRecovered"]
   Phase -->|paused| Paused["等待显式 resume"]
   Phase -->|terminal| Terminal["只读返回"]
@@ -123,3 +131,25 @@ flowchart TD
 只在稳定边界保存派生快照。工具返回新的 workspace
 revision 时，后续 checkpoint 会同步该版本，因此 Agent 自己已经确认的 edit 不会在重启时被误判成外部修改。Checkpoint 可丢弃；Session
 facts 才是真相来源。
+
+## 工具生命周期最小矩阵（M6）
+
+```text
+pending ──tool.started──▶ running ──tool.completed──▶ completed
+  │                        │
+  │                        ├─tool.failed────────────▶ failed（确定失败）
+  │                        ├─tool.cancelled─────────▶ cancelled（正常协作取消，先落盘真实 ToolResult）
+  │                        └─tool.outcome_unknown───▶ outcome_unknown（崩溃/强制中断，带合成结果）
+  └─Run 结束──────────────▶ abandoned（未开始即放弃，无结果）
+```
+
+- 正常取消：先持久化 `tool.cancelled`（payload 含真实 `cancelled`
+  ToolResult：取消原因、已有输出、effects），成功后才提交 `run.cancelled`；绝不把正常取消标成
+  `outcome_unknown`。
+- `tool.outcome_unknown`：仅当工具已开始执行但 Runtime 因进程中断或强制取消未取得结果时记录；至少包含
+  `callId / toolName / effectClass / reason / retryPolicy:"never_automatic" / recordedCallEventId`，并携带模型可见的合成 ToolResult（说明可能已产生副作用、禁止自动重试）。并行组用
+  `Promise.allSettled` 等待所有工具停止：已返回的真实结果照常结算，只有确实无结果的调用记 unknown。
+- `abandoned`：仅表示 Run 结束时尚未开始的调用被放弃，不伪造结果。
+- 有副作用工具发生 `outcome_unknown` 后不自动重放；恢复器只追加一次对账事件（幂等）。
+- 终态冲刷：部分结算的批次（多组 ToolCall 下恢复器只结算当前组）在 Run 终结时由 Reducer 把已确定/合成结果写回 transcript，保证状态层可见；`side_effect_result_unknown`
+  后原 Run 不再调用模型，合成结果供审计视图与未来 Context Projection/下一 Turn handoff 消费。

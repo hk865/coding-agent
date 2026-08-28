@@ -14,6 +14,7 @@ import {
 } from "../../core/ports/session_store/session-store-port.js";
 import { RecoveryCoordinator } from "../../core/runtime/recovery/recovery-coordinator.js";
 import type { RecoveryAction } from "../../core/runtime/recovery/recovery-coordinator.js";
+import { CheckpointingEventSink } from "../../core/runtime/checkpointing/checkpointing-event-sink.js";
 import { RuntimeRunner } from "../../core/runtime/loop/runtime-runner.js";
 import type { RunState } from "../../core/runtime/state/run-state.js";
 import { EmptyMemoryProvider } from "../../memory/providers/empty/empty-memory-provider.js";
@@ -136,11 +137,25 @@ export async function resumeCodingAgent(input: Readonly<ResumeAppInput>): Promis
     if (!turnRecord || turnRecord.recordType !== "turn.started") {
       throw new Error(`Session ${input.sessionId} 没有可恢复 Turn`);
     }
-    const recovery = await new RecoveryCoordinator({ sessions: store, checkpoints: store }).recover(
-      input.sessionId,
-      { signal },
-      { config: snapshot, workspace: currentWorkspace },
-    );
+    const recovery = await new RecoveryCoordinator({
+      sessions: store,
+      checkpoints: store,
+      toolEffectClass: (name) => tools.resolve(name)?.effectClass ?? "process",
+    }).recover(input.sessionId, { signal }, { config: snapshot, workspace: currentWorkspace });
+    // 恢复追加的对账事实（process_interrupted / tool.outcome_unknown / run.failed / run.completed）
+    // 必须与 Session 落盘一致地投递给 observer/Web Projection，用户时间线才能看到
+    // 副作用未知、取消或放弃的工具事实；best_effort 失败只记诊断，不影响恢复结果。
+    for (const event of recovery.reconciledEvents) {
+      for (const observer of input.observerEventSinks ?? []) {
+        await observer.publish(event, { signal }).catch((error: unknown) => {
+          console.warn(`恢复事件投递失败（${observer.sinkId}）：${String(error)}`);
+        });
+      }
+    }
+    // terminal 与 side_effect_result_unknown 都是唯一终态：原 Run 已结束，
+    // 当前生产路径不会再调用模型。合成 ToolResult 已作为 tool_result 写入 Session
+    // 事实（transcript），供审计视图与未来的 Context Projection/下一 Turn handoff 消费；
+    // 这是「结果对模型可见」的实际边界，不要声称恢复后同一 Turn 会自动看到。
     if (recovery.action === "terminal" || recovery.action === "side_effect_result_unknown") {
       return {
         sessionId: input.sessionId,
@@ -217,10 +232,18 @@ export async function resumeCodingAgent(input: Readonly<ResumeAppInput>): Promis
       sandboxProfileVersion: processProfile.version,
     });
     const sessionSink = await SessionEventSink.connect(store, input.sessionId, { signal });
+    // 恢复续跑同样接入 checkpoint sink，使工具边界派生快照覆盖整个生命周期。
+    const checkpointSink = new CheckpointingEventSink(
+      recovery.state,
+      store,
+      sessionSink,
+      snapshot,
+      currentWorkspace,
+    );
     const runner = new RuntimeRunner({
       modelClient,
       toolExecutor: dispatcher,
-      eventSinks: [sessionSink, ...(input.observerEventSinks ?? [])],
+      eventSinks: [checkpointSink, sessionSink, ...(input.observerEventSinks ?? [])],
       limits,
       toolBatchPolicy: new RegistryToolBatchPolicy(tools),
       maxModelRetries: 0,

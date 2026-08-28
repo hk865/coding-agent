@@ -21,6 +21,8 @@ import type {
 import { canonicalJson, StoreError } from "../../ports/session_store/session-store-port.js";
 import type { AgentEvent } from "../events/agent-events.js";
 import { reduceRunState } from "../reducer/run-state-reducer.js";
+import { outcomeUnknownPayload } from "../tool-outcome-unknown.js";
+import type { ToolEffectClass } from "../../ports/tool_executor/tool-executor-port.js";
 import {
   createInitialRunState,
   deriveRunPhase,
@@ -45,6 +47,8 @@ export interface RecoveryResult {
   readonly action: RecoveryAction;
   readonly checkpointId: string | null;
   readonly reconciledEvent: AgentEvent | null;
+  /** 本次恢复追加到 Session 的全部对账事件（按追加顺序），供 observer/Web Projection 消费。 */
+  readonly reconciledEvents: readonly AgentEvent[];
 }
 
 export interface RecoveryEnvironment {
@@ -57,6 +61,11 @@ export interface RecoveryCoordinatorDependencies {
   readonly checkpoints?: CheckpointStorePort;
   readonly idFactory?: () => string;
   readonly now?: () => Date;
+  /**
+   * 返回工具声明的副作用类别，用于 outcome_unknown 审计与合成结果。
+   * 缺省按最保守的 process 处理（可能产生副作用，禁止自动重试）。
+   */
+  readonly toolEffectClass?: (name: string) => ToolEffectClass;
 }
 
 /**
@@ -68,12 +77,15 @@ export class RecoveryCoordinator {
   readonly #checkpoints: CheckpointStorePort | undefined;
   readonly #idFactory: () => string;
   readonly #now: () => Date;
+  readonly #toolEffectClass: (name: string) => ToolEffectClass;
+  #reconciliationCount = 0;
 
   constructor(dependencies: RecoveryCoordinatorDependencies) {
     this.#sessions = dependencies.sessions;
     this.#checkpoints = dependencies.checkpoints;
     this.#idFactory = dependencies.idFactory ?? randomUUID;
     this.#now = dependencies.now ?? (() => new Date());
+    this.#toolEffectClass = dependencies.toolEffectClass ?? (() => "process");
   }
 
   async recover(
@@ -97,14 +109,23 @@ export class RecoveryCoordinator {
     );
     let state = checkpointState ?? createInitialRunState(turnRecord.payload.run);
     const cursor = checkpoint?.recordPosition ?? turnRecord.position;
+    // 重放范围内已提交的 tool.started 事件 eventId，供 outcome_unknown 审计追踪。
+    // running tool 不可能来自 checkpoint（checkpoint 只在稳定边界保存），因此必然在重放中可见。
+    const toolStartedEventIds = new Map<string, string>();
     for (const record of runRecords) {
       if (record.position <= cursor || record.recordType !== "agent.event") continue;
       if (record.payload.event.meta.runId !== runId) break;
+      if (record.payload.event.type === "tool.started") {
+        toolStartedEventIds.set(
+          record.payload.event.payload.call.callId,
+          record.payload.event.meta.eventId,
+        );
+      }
       state = reduceRunState(state, record.payload.event);
     }
     let revision = header.revision;
     let lastPosition = records.at(-1)?.position ?? 0;
-    let reconciledEvent: AgentEvent | null = null;
+    const reconciledEvents: AgentEvent[] = [];
     let action: RecoveryAction;
 
     const runningTool = state.toolBatch?.calls.some((call) => call.status === "running") ?? false;
@@ -125,7 +146,7 @@ export class RecoveryCoordinator {
     if (isTerminalRunStatus(state.status)) action = "terminal";
     else if (state.status === "paused") action = "paused";
     else if (state.activeModelRequest) {
-      reconciledEvent = this.#event(state, "model.request_failed", {
+      const interrupted = this.#event(state, "model.request_failed", {
         requestId: state.activeModelRequest.requestId,
         failure: {
           category: "model",
@@ -135,30 +156,61 @@ export class RecoveryCoordinator {
           operationId: state.activeModelRequest.requestId,
         },
       });
+      reconciledEvents.push(interrupted);
       ({ state, revision, lastPosition } = await this.#appendReconciliation(
         sessionId,
         revision,
         state,
-        reconciledEvent,
+        interrupted,
         options,
       ));
       action = "continue_before_model";
     } else if (state.toolBatch?.calls.some((call) => call.status === "running")) {
-      const running = state.toolBatch.calls.find((call) => call.status === "running")!;
-      reconciledEvent = this.#event(state, "run.failed", {
+      // 先为每个已开始但无结果的调用追加结构化 tool.outcome_unknown（含模型可见合成结果），
+      // 再终止原 Run；有副作用工具绝不自动重放。
+      const running = state.toolBatch.calls.filter((call) => call.status === "running");
+      for (const call of running) {
+        // running 调用必然有已提交的 tool.started（执行前屏障）；缺失说明日志损坏。
+        const recordedCallEventId = toolStartedEventIds.get(call.requestedCall.callId);
+        if (!recordedCallEventId) {
+          throw new StoreError(
+            "corrupt",
+            `running 调用 ${call.requestedCall.callId} 缺少 tool.started 事件`,
+          );
+        }
+        const unknownEvent = this.#event(state, "tool.outcome_unknown", {
+          ...outcomeUnknownPayload(
+            call.requestedCall,
+            "process_interrupted",
+            this.#toolEffectClass(call.requestedCall.name),
+            recordedCallEventId,
+          ),
+        });
+        reconciledEvents.push(unknownEvent);
+        // 循环内只推进 state/revision；lastPosition 在最终 run.failed 对账时统一读取。
+        ({ state, revision } = await this.#appendReconciliation(
+          sessionId,
+          revision,
+          state,
+          unknownEvent,
+          options,
+        ));
+      }
+      const failedEvent = this.#event(state, "run.failed", {
         failure: {
           category: "tool_executor",
           code: "side_effect_result_unknown",
-          message: `工具 ${running.requestedCall.name} 的结果未知；原 Run 不会自动重放`,
+          message: `工具结果未知（已记录 tool.outcome_unknown）；原 Run 不会自动重放`,
           retryable: false,
-          operationId: running.requestedCall.callId,
+          operationId: running[0]!.requestedCall.callId,
         },
       });
+      reconciledEvents.push(failedEvent);
       ({ state, revision, lastPosition } = await this.#appendReconciliation(
         sessionId,
         revision,
         state,
-        reconciledEvent,
+        failedEvent,
         options,
       ));
       action = "side_effect_result_unknown";
@@ -167,14 +219,15 @@ export class RecoveryCoordinator {
       if (phase === "ready_to_complete") {
         const last = state.transcript.at(-1);
         if (last?.kind !== "assistant_message") throw new StoreError("corrupt", "最终消息缺失");
-        reconciledEvent = this.#event(state, "run.completed", {
+        const completed = this.#event(state, "run.completed", {
           finalMessageId: last.message.messageId,
         });
+        reconciledEvents.push(completed);
         ({ state, revision, lastPosition } = await this.#appendReconciliation(
           sessionId,
           revision,
           state,
-          reconciledEvent,
+          completed,
           options,
         ));
         action = "terminal";
@@ -190,7 +243,8 @@ export class RecoveryCoordinator {
       state,
       action,
       checkpointId: checkpoint?.checkpointId ?? null,
-      reconciledEvent,
+      reconciledEvent: reconciledEvents[0] ?? null,
+      reconciledEvents,
     };
   }
 
@@ -294,11 +348,13 @@ export class RecoveryCoordinator {
     type: TType,
     payload: Extract<AgentEvent, { type: TType }>["payload"],
   ): Extract<AgentEvent, { type: TType }> {
+    // 同一次 recover 可能追加多个对账事件，eventId 必须唯一（eventId 不能与最后事件重复）。
+    this.#reconciliationCount += 1;
     return {
       type,
       meta: {
         schemaVersion: 1,
-        eventId: `recovery:${this.#idFactory()}`,
+        eventId: `recovery:${this.#idFactory()}#${this.#reconciliationCount}`,
         runId: state.runId,
         turnId: state.turn.turnId,
         sequence: state.lastEventSequence + 1,

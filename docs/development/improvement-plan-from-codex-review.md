@@ -3,8 +3,9 @@
 > 来源：两段 ChatGPT/Codex 对话（codex://threads/01a04760-10d3-7442-a2a4-7ba861208a05 与 codex://threads/01a0474f-8411-7691-b55e-115ca8f79336），主题分别是「Pi
 > / DSH /
 > coding-agent 架构对比与性能评估」和「Session 状态保留、取消/崩溃边界、DSH 借鉴」。本文档汇总两段对话最终达成的修改结论，并已对照
-> **当前工作树源码**（分支
-> `codex/m6-completion`，含未提交改动）逐条核对现状。对话中引用的行号与当前代码可能因近期改动略有偏移，均已复核。
+> **M6 基线源码**（分支 `codex/m6-completion`，标签 `m6-baseline`，提交
+> `beaeaff7b1d830498fd98308a549b154383165c0`）逐条核对现状。核对时点工作树干净；此后 1-1/1-2/2-1 已实现（见 ADR-0005 与
+> `tests/review/`），当前工作树含未提交改动与用户文档。对话中引用的行号与当前代码可能因近期改动略有偏移，均已复核。
 >
 > 维护建议：每完成一项，在本文件对应条目勾选并记录提交号。
 
@@ -35,11 +36,17 @@ Store、edit 确定性对账、沙箱/审批加固；最后再推进 Projection�
 
 ## 1. P0：先修「正常取消」与「工具生命周期」语义（对话最高优先级）
 
+> ✅ **1-1、1-2、2-1 已完成**（2026-08-28，对应提交见 `git log` 中「tool
+> lifecycle」相关提交；实现证据：
+> `tests/integration/runtime-tool-states.test.ts`、`docs/adr/0005-tool-lifecycle-states.md`）。
+> `result_unknown` 已更名为 `outcome_unknown`；`tool.cancelled` 先于 `run.cancelled`
+> 落盘；恢复器先追加 `tool.outcome_unknown`（含合成结果）再 `run.failed`。
+
 ### 1-1 正常取消必须保存真实 cancelled ToolResult
 
 **对话结论（两段对话一致，且是「最值得立即做的修改」）：**
 
-当前问题链：
+当前问题链（M6 基线 `beaeaff`）：
 
 ```
 Tool 返回 cancelled ToolResult + effects
@@ -49,7 +56,7 @@ Tool 返回 cancelled ToolResult + effects
   → Reducer 把运行中的 Tool 标为 result_unknown
 ```
 
-应该改成：
+应该改成（**本轮已实现**）：
 
 ```
 Tool 返回 cancelled ToolResult
@@ -61,7 +68,7 @@ Tool 返回 cancelled ToolResult
 这样「正常取消」与「Runtime 突然消失」可明确区分：
 
 - 正常取消：存在真实 `tool.cancelled + ToolResult`；
-- Runtime 崩溃/被强杀：只有 `tool.started`，才是 `result_unknown`。
+- Runtime 崩溃/被强杀：只有 `tool.started`，才是 `outcome_unknown`（合成结果 + 禁止自动重试）。
 
 **源码现状（已核对，当前工作树）：**
 
@@ -76,17 +83,18 @@ Tool 返回 cancelled ToolResult
 - 附带后果（对话中明确指出的真实缺口）：shell 在取消时其实已经杀了进程组、收集了 stdout/stderr、对比了 changedPaths/workspaceRevision（`src/sandbox/process/process-sandbox.ts:230`
   附近），这些成果全部没有进 Session。Pi 在正常取消时反而会把 aborted/error ToolResult 写入 JSONL。
 
-**需要修改的文件：**
+**需要修改的文件（本轮已全部完成）：**
 
 - `src/core/runtime/events/agent-events.ts`：新增 `tool.cancelled` 事件类型与 payload schema。
-- `src/core/runtime/state/run-state.ts`：Tool call status 增加 `cancelled`；`result_unknown`
-  保留给崩溃场景。
-- `src/core/runtime/reducer/run-state-reducer.ts`：`tool.cancelled`
-  的归约；取消时 running→cancelled。
-- `src/core/runtime/loop/runtime-runner.ts:695`：取消路径改为「先提交 tool.cancelled，再提交 run.cancelled」。
-- Web Timeline 事件投影（`src/app/web/web-run-manager.ts` 相关分支）。
-- 测试：`tests/integration/runtime-resilience.test.ts`、`tests/integration/runtime-runner.test.ts`
-  增加「工具执行中取消 → Session 存在 cancelled ToolResult」用例。
+- `src/core/runtime/state/run-state.ts`：Tool call status 增加 `cancelled` 与 `outcome_unknown`，
+  `result_unknown` 移除。
+- `src/core/runtime/reducer/run-state-reducer.ts`：`tool.cancelled` / `tool.outcome_unknown`
+  的归约；取消时 running→cancelled；终结兜底 pending→abandoned、running→outcome_unknown。
+- `src/core/runtime/loop/runtime-runner.ts`：取消路径改为「先提交 tool.cancelled，再提交 run.cancelled」；强制中断先记录
+  `tool.outcome_unknown`。
+- Web Timeline 事件投影（`src/app/web/web-event-projection.ts`）。
+- 测试：`tests/integration/runtime-tool-states.test.ts`（8 用例）、`tests/unit/web-event-projection.test.ts`、
+  `tests/integration/m4-storage.test.ts`、`tests/e2e/m4-cross-process.test.ts`。
 
 ### 1-2 建立明确的 Tool 生命周期矩阵
 
@@ -106,10 +114,10 @@ pending → started → completed → failed → cancelled → outcome_unknown
 现有 `abandoned` 只保留给「Run 结束时尚未启动的并行调用」，不得与 `cancelled`/`outcome_unknown`
 混用。
 
-**源码现状（已核对）：** `src/core/runtime/state/run-state.ts:150`：
-`status: z.enum(["pending", "running", "completed", "failed", "abandoned", "result_unknown"])`
-——缺少 `cancelled` 与 `outcome_unknown`，且 `running` 命名与矩阵不一致（可保留 `running`
-作为 started 的实现名，但语义文档要写清楚；是否改名由实现决定，事件语义必须对齐矩阵）。
+**源码现状（已核对，本轮已实现）：** `src/core/runtime/state/run-state.ts`：
+`status: z.enum(["pending", "running", "completed", "failed", "cancelled", "outcome_unknown", "abandoned"])`
+——`cancelled` 与 `outcome_unknown` 已加入，`result_unknown` 已移除；`running`
+作为 started 的实现名保留，语义见 `docs/adr/0005-tool-lifecycle-states.md`。
 
 ---
 
@@ -145,8 +153,17 @@ tool.outcome_unknown → run.failed / turn.interrupted
 借鉴 DSH 但**不照搬**其整套 Session 平台（DSH 用 `TOOL_NOT_STARTED` /
 `TOOL_OUTCOME_UNKNOWN`，见 deepseek-harness `packages/core/session/src/repair.ts`）。
 
-**源码现状（已核对）：** `src/core/runtime/recovery/recovery-coordinator.ts:148-164`：恢复时直接
-`#event(state, "run.failed", { code: "side_effect_result_unknown", ... })`；没有 tool 级事件、没有模型可见的合成结果。
+**源码现状（已核对，本轮已实现）：**
+`src/core/runtime/recovery/recovery-coordinator.ts`：恢复时对每个 running 调用先追加
+`tool.outcome_unknown`（含 `callId/toolName/effectClass/reason/retryPolicy/recordedCallEventId`
+与合成结果），再追加 `run.failed(side_effect_result_unknown)`；Runner 侧强制中断同样记录
+`tool.outcome_unknown(cancelled_while_running)`（并行组**有界 drain**
+等待所有工具停止，只把确实无结果的调用记 unknown）。配套保障：`tool.started`
+落盘失败不启动工具副作用；`recordedCallEventId` 仅成功后记录；`tool.cancelled`
+的部分写入 revision 纳入 checkpoint。合成结果写入 Session 事实（transcript）并从恢复状态可投影为模型输入；
+**边界**：`side_effect_result_unknown`
+后原 Run 已终态，当前生产路径不再调用模型，合成结果供审计视图与未来 Context Projection/下一 Turn
+handoff 消费（见 ADR-0005 与测试 `runtime-tool-states.test.ts` 的 Context Projection 用例）。
 
 ### 2-2 edit 确定性对账（大幅缩小「结果未知」窗口）
 
@@ -377,22 +394,47 @@ approval_policy = on_request | never
 
 ## 附录：关键源码位置索引（当前工作树，2025-08 状态）
 
-| 主题                                                | 文件:行                                                                            |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| 取消时丢弃 cancelled ToolResult                     | `src/core/runtime/loop/runtime-runner.ts:695-701`                                  |
-| 取消归约 running→result_unknown / pending→abandoned | `src/core/runtime/reducer/run-state-reducer.ts:72-73`                              |
-| Tool call 状态枚举（缺 cancelled/outcome_unknown）  | `src/core/runtime/state/run-state.ts:150`                                          |
-| 恢复直接 run.failed(side_effect_result_unknown)     | `src/core/runtime/recovery/recovery-coordinator.ts:148-164`                        |
-| edit expectedRevision / newRevision / 16KiB diff    | `src/tools/builtin/edit/edit-tool.ts:25,50-52,96`                                  |
-| artifactRefs schema（实现为空）                     | `src/core/ports/tool_executor/tool-executor-port.ts:41`；各工具 `artifactRefs: []` |
-| chunk 仅内存（10,000 上限）                         | `src/app/web/web-run-manager.ts:368,379-384`                                       |
-| ADR-0004「只持久化完整 assistant 消息」             | `docs/adr/0004-streaming-and-workspace-consistency.md:22`                          |
-| SQLite WAL/FULL/busy_timeout/BEGIN IMMEDIATE        | `src/storage/adapters/sqlite/sqlite-stores.ts:422-425,596`                         |
-| Reducer 全量 parse + transcript 复制                | `src/core/runtime/reducer/run-state-reducer.ts:239-260,126-127,183-187`            |
-| Context 选择重复序列化                              | `src/core/context/selection_policy/context-selection-policy.ts:48-49,174-207`      |
-| Workspace snapshot（git status / 遍历）             | `src/sandbox/workspace/workspace-sandbox.ts:459-465,527`                           |
-| 绝对路径统一拒绝                                    | `src/policy/permissions/permission-policy.ts:56`                                   |
-| 审批 allow_for_run（按工具名）                      | `src/app/web/web-run-manager.ts:246-257,320`                                       |
-| 工具 effectClass 三分类                             | `src/tools/schemas/tool-schemas.ts:15,63-64`                                       |
-| 只读工具并行策略                                    | `src/tools/registry/tool-registry.ts:154` 附近                                     |
-| 演进总览（Inbox/Profile/多 Agent 方向）             | `docs/architecture/evolution-overview.md`                                          |
+| 主题                                                    | 文件:行                                                                            |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| ✅ 取消先落盘 tool.cancelled 再 run.cancelled           | `src/core/runtime/loop/runtime-runner.ts`（`#executeTools` 结果结算循环）          |
+| ✅ 终结兜底 pending→abandoned / running→outcome_unknown | `src/core/runtime/reducer/run-state-reducer.ts`（`abandonUnsettledTools`）         |
+| ✅ Tool call 状态枚举（含 cancelled/outcome_unknown）   | `src/core/runtime/state/run-state.ts`（`toolExecutionStateSchema`）                |
+| ✅ 恢复先 tool.outcome_unknown 再 run.failed            | `src/core/runtime/recovery/recovery-coordinator.ts`（running tool 分支）           |
+| ✅ 合成 ToolResult / outcome_unknown payload            | `src/core/runtime/tool-outcome-unknown.ts`                                         |
+| edit expectedRevision / newRevision / 16KiB diff        | `src/tools/builtin/edit/edit-tool.ts:25,50-52,96`                                  |
+| artifactRefs schema（实现为空）                         | `src/core/ports/tool_executor/tool-executor-port.ts:41`；各工具 `artifactRefs: []` |
+| chunk 仅内存（10,000 上限）                             | `src/app/web/web-run-manager.ts:368,379-384`                                       |
+| ADR-0004「只持久化完整 assistant 消息」                 | `docs/adr/0004-streaming-and-workspace-consistency.md:22`                          |
+| SQLite WAL/FULL/busy_timeout/BEGIN IMMEDIATE            | `src/storage/adapters/sqlite/sqlite-stores.ts:422-425,596`                         |
+| Reducer 全量 parse + transcript 复制                    | `src/core/runtime/reducer/run-state-reducer.ts:239-260,126-127,183-187`            |
+| Context 选择重复序列化                                  | `src/core/context/selection_policy/context-selection-policy.ts:48-49,174-207`      |
+| Workspace snapshot（git status / 遍历）                 | `src/sandbox/workspace/workspace-sandbox.ts:459-465,527`                           |
+| 绝对路径统一拒绝                                        | `src/policy/permissions/permission-policy.ts:56`                                   |
+| 审批 allow_for_run（按工具名）                          | `src/app/web/web-run-manager.ts:246-257,320`                                       |
+| 工具 effectClass 三分类                                 | `src/tools/schemas/tool-schemas.ts:15,63-64`                                       |
+| 只读工具并行策略                                        | `src/tools/registry/tool-registry.ts:154` 附近                                     |
+| 演进总览（Inbox/Profile/多 Agent 方向）                 | `docs/architecture/evolution-overview.md`                                          |
+
+---
+
+## 补充：第三轮独立复审 Runner 残余项修复（2026-08-28）
+
+独立复审（`docs/development/m6-independent-quality-re-review-round-3-2026-08-28.md`）在第三轮修复后仍发现三个 Runner 阻塞项，本小节记录其修复（尚未提交）：
+
+1. **`check` scenarioId 路径穿越**：`check` 曾有意接受外部场景目录并直接执行外部
+   `acceptance/check.mjs`。已移除该例外：`list`/`validate`/`check` 统一使用 canonical direct-child
+   containment，越界 id 输出 `runner_error` 且不执行任何外部脚本。Runner 自测改用「复制
+   `runner.mjs` + `vendor/` 到临时场景根」模式（`tests/review/scenario-runner-security.test.ts`
+   第 4–8 项、`scenario-runner-residual-security.test.ts`）。
+2. **environment.yaml 无结构 schema**：原实现只做行级 key/value 与括号配对检查，`title: incomplete`
+   也能通过。已改用真实 YAML parser（vendored
+   js-yaml，`tests/scenarios/vendor/js-yaml.mjs`，重复 key 即结构错误），并按显式 schema 校验必需字段（scenario/title/runtime/tools/permissions/budget/evaluation，dependencies 可选）、字段类型、嵌套结构与未知字段。
+3. **合法 JSON 但协议结构无效可假通过**：exit 0 输出 `{}`
+   或数组曾被判 pass。已增加 acceptance 输出协议校验：`status` 只允许 `pass`/`fail`
+   且 pass 必须显式声明；`failureClassification` 必须与 status 一致；`checks`（若存在）必须为
+   `{ name, pass }`
+   数组且与总 status 一致（pass 时不得存在未通过的阻塞检查项、fail 时必须存在未通过的阻塞检查项）；任何不可解析的输出不论退出码一律
+   `runner_error`；协议违规一律 `runner_error`（带 `protocolError`）。
+
+反向门禁保留为 `tests/review/scenario-runner-residual-security.test.ts`（6 项）与
+`tests/review/scenario-runner-security.test.ts`（8 项），未降低断言。

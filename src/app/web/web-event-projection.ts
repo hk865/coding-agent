@@ -29,7 +29,8 @@ export interface WebRuntimeProjection {
   readonly sourceType: AgentEvent["type"];
   readonly eventSequence: number;
   readonly kind: "run" | "model" | "tool";
-  readonly status: "started" | "completed" | "failed" | "paused" | "cancelled" | "usage";
+  readonly status:
+    "started" | "completed" | "failed" | "paused" | "cancelled" | "outcome_unknown" | "usage";
   readonly title: string;
   readonly summary: string;
   readonly input: string | null;
@@ -338,22 +339,49 @@ export class WebEventProjectionSink implements EventSinkPort {
         });
       }
       case "tool.completed":
-      case "tool.failed": {
+      case "tool.failed":
+      case "tool.cancelled":
+      case "tool.outcome_unknown": {
         const pending = this.#pendingTools.get(event.payload.callId);
-        const result = event.payload.result;
+        const result =
+          event.type === "tool.outcome_unknown"
+            ? event.payload.synthesizedResult
+            : event.payload.result;
         const durationMs = pending ? Math.max(0, event.meta.elapsedMs - pending.startedMs) : null;
         if (durationMs !== null) this.#toolMs += durationMs;
         this.#pendingTools.delete(event.payload.callId);
+        const status =
+          event.type === "tool.completed"
+            ? "completed"
+            : event.type === "tool.failed"
+              ? "failed"
+              : event.type === "tool.cancelled"
+                ? "cancelled"
+                : "outcome_unknown";
+        const title =
+          event.type === "tool.cancelled"
+            ? `${pending?.call.name ?? "tool"} 已取消`
+            : event.type === "tool.outcome_unknown"
+              ? `${pending?.call.name ?? event.payload.toolName} 结果未知`
+              : (pending?.call.name ?? "tool");
+        const summary =
+          event.type === "tool.outcome_unknown"
+            ? "进程中断/强制取消，结果未知；禁止自动重试"
+            : resultSummary(result);
+        const toolName =
+          event.type === "tool.outcome_unknown"
+            ? event.payload.toolName
+            : (pending?.call.name ?? null);
         return this.#base(event, {
           kind: "tool",
-          status: event.type === "tool.completed" ? "completed" : "failed",
-          title: pending?.call.name ?? "tool",
-          summary: resultSummary(result),
+          status,
+          title,
+          summary,
           input: pending ? jsonText(pending.call.arguments, MAX_ARGUMENT_CHARS) : null,
           output: outputText(result),
           requestId: null,
           callId: event.payload.callId,
-          toolName: pending?.call.name ?? null,
+          toolName,
           durationMs,
         });
       }

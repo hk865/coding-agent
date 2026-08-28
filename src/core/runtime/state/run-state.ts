@@ -142,12 +142,29 @@ export const activeModelRequestSchema = z
   })
   .strict();
 
+/**
+ * 工具生命周期最小矩阵：
+ *  - pending：模型已提出，尚未进入执行（Run 结束未启动则 abandoned）；
+ *  - running：tool.started 已持久化，副作用已允许开始（矩阵中的 started）；
+ *  - completed / failed / cancelled：取得确定结果（success / error / cancelled）并持久化；
+ *  - outcome_unknown：已开始执行但 Runtime 因崩溃或强制中断未取得结果；
+ *     显式路径由 tool.outcome_unknown 事件携带合成结果；Run 终结兜底时不携带结果；
+ *  - abandoned：Run 结束时尚未开始的调用被放弃，不允许伪造结果。
+ */
 export const toolExecutionStateSchema = z
   .object({
     ordinal: z.number().int().nonnegative(),
     requestedCall: toolCallSchema,
     effectiveCall: toolCallSchema.nullable(),
-    status: z.enum(["pending", "running", "completed", "failed", "abandoned", "result_unknown"]),
+    status: z.enum([
+      "pending",
+      "running",
+      "completed",
+      "failed",
+      "cancelled",
+      "outcome_unknown",
+      "abandoned",
+    ]),
     result: toolResultSchema.nullable(),
   })
   .strict();
@@ -294,7 +311,11 @@ export function validateRunStateInvariants(input: unknown): RunStateInvariantRes
   if (hasDuplicate(messageIds)) return invalidState("transcript 中 messageId 不能重复");
 
   if (state.toolBatch) {
-    const sourceMessage = state.transcript.at(-1);
+    // batch 必须对应 transcript 中最近的 assistant message；终态冲刷 tool_result
+    // 后末尾不再是 assistant message，因此从尾部回溯查找。
+    const sourceMessage = [...state.transcript]
+      .reverse()
+      .find((entry) => entry.kind === "assistant_message");
     if (
       sourceMessage?.kind !== "assistant_message" ||
       state.toolBatch.sourceMessageId !== sourceMessage.message.messageId
@@ -319,11 +340,14 @@ export function validateRunStateInvariants(input: unknown): RunStateInvariantRes
       if (call.status === "running" && (call.effectiveCall === null || call.result !== null)) {
         return invalidState("running tool 必须有 effectiveCall 且尚无 result");
       }
-      if (["completed", "failed"].includes(call.status) && call.result === null) {
-        return invalidState("已结算 tool 必须有 result");
+      if (["completed", "failed", "cancelled"].includes(call.status) && call.result === null) {
+        return invalidState("已结算 tool（completed/failed/cancelled）必须有 result");
       }
-      if (["abandoned", "result_unknown"].includes(call.status) && call.result !== null) {
-        return invalidState("abandoned/result_unknown 不能伪造 result");
+      if (call.status === "outcome_unknown" && call.effectiveCall === null) {
+        return invalidState("outcome_unknown 必须对应已开始的调用");
+      }
+      if (call.status === "abandoned" && call.result !== null) {
+        return invalidState("abandoned 不能伪造 result");
       }
     }
   }
@@ -350,7 +374,9 @@ export function validateRunStateInvariants(input: unknown): RunStateInvariantRes
     }
     if (
       state.toolBatch &&
-      state.toolBatch.calls.every((call) => ["completed", "failed"].includes(call.status))
+      state.toolBatch.calls.every((call) =>
+        ["completed", "failed", "cancelled", "outcome_unknown"].includes(call.status),
+      )
     ) {
       return invalidState("全部结算的 toolBatch 应已写回 transcript 并清空");
     }

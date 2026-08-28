@@ -41,6 +41,7 @@ import type {
 import type {
   FailedToolResult,
   ToolCall,
+  ToolEffectClass,
   ToolExecutorPort,
   ToolResult,
 } from "../../ports/tool_executor/tool-executor-port.js";
@@ -52,6 +53,8 @@ import type { AgentEvent } from "../events/agent-events.js";
 import { LimitGuard, UNLIMITED_RUN_LIMITS } from "../limits/limit-guard.js";
 import type { LimitViolation, RunLimits } from "../limits/limit-guard.js";
 import { reduceRunState } from "../reducer/run-state-reducer.js";
+import { outcomeUnknownPayload } from "../tool-outcome-unknown.js";
+import type { ToolOutcomeUnknownReason } from "../tool-outcome-unknown.js";
 import {
   createInitialRunState,
   deriveRunPhase,
@@ -104,6 +107,17 @@ export interface RuntimeRunnerDependencies {
   readonly eventSinkTimeoutMs?: number;
   readonly onTextDelta?: (delta: string, requestId: string) => void;
   readonly onReasoningDelta?: (delta: string, requestId: string) => void;
+  /**
+   * 返回工具声明的副作用类别，用于 outcome_unknown 的审计与合成结果。
+   * 缺省按最保守的 process 处理（可能产生副作用，禁止自动重试）。
+   */
+  readonly toolEffectClass?: (call: Readonly<ToolCall>) => ToolEffectClass;
+  /**
+   * 工具组收尾的有界等待时间（毫秒）。组内个别工具忽略 AbortSignal 且永不返回时，
+   * drain 超时后按「结果未知」落盘 cancelled/outcome_unknown，避免取消流程永久挂起。
+   * 0 表示无限等待（不推荐）；默认 5_000。
+   */
+  readonly toolDrainTimeoutMs?: number;
 }
 
 class SystemClock implements RuntimeClock {
@@ -136,6 +150,8 @@ interface ExecutionContext {
   readonly startedEpochMs: number;
   readonly initialElapsedMs: number;
   readonly presentations: Map<string, ToolResult["output"]>;
+  /** 已成功提交的 tool.started 事件 eventId，供 outcome_unknown 审计追踪。 */
+  readonly toolStartedEventIds: Map<string, string>;
 }
 
 function failure(
@@ -216,6 +232,8 @@ export class RuntimeRunner {
   readonly #maxModelRetries: number;
   readonly #onTextDelta: ((delta: string, requestId: string) => void) | undefined;
   readonly #onReasoningDelta: ((delta: string, requestId: string) => void) | undefined;
+  readonly #toolEffectClass: (call: Readonly<ToolCall>) => ToolEffectClass;
+  readonly #toolDrainTimeoutMs: number;
   #busy = false;
 
   constructor(dependencies: RuntimeRunnerDependencies) {
@@ -239,6 +257,12 @@ export class RuntimeRunner {
     }
     this.#onTextDelta = dependencies.onTextDelta;
     this.#onReasoningDelta = dependencies.onReasoningDelta;
+    this.#toolEffectClass = dependencies.toolEffectClass ?? (() => "process");
+    const toolDrainTimeoutMs = dependencies.toolDrainTimeoutMs ?? 5_000;
+    if (!Number.isSafeInteger(toolDrainTimeoutMs) || toolDrainTimeoutMs < 0) {
+      throw new RangeError("toolDrainTimeoutMs 必须是非负安全整数");
+    }
+    this.#toolDrainTimeoutMs = toolDrainTimeoutMs;
   }
 
   async run(
@@ -310,6 +334,7 @@ export class RuntimeRunner {
       startedEpochMs: this.#clock.now().getTime(),
       initialElapsedMs: initialState.elapsedMs,
       presentations: new Map(),
+      toolStartedEventIds: new Map(),
     };
     try {
       return await this.#execute(initialState, context, mode);
@@ -358,7 +383,13 @@ export class RuntimeRunner {
     const event = this.#createEvent(state, context, type, payload);
     const deliverySignal = new AbortController().signal;
     try {
-      return await this.#delivery.commit(state, event, deliverySignal, excludedSinkIds);
+      const committed = await this.#delivery.commit(state, event, deliverySignal, excludedSinkIds);
+      // tool.started 只有经全部 required sink 成功确认后才可被 outcome_unknown 引用；
+      // 落盘失败（RequiredSinkError 降级为 run.failed）时不得残留未提交的 eventId。
+      if (event.type === "tool.started") {
+        context.toolStartedEventIds.set(event.payload.call.callId, event.meta.eventId);
+      }
+      return committed;
     } catch (error) {
       if (!(error instanceof RequiredSinkError)) throw error;
       const candidate = reduceRunState(state, event);
@@ -378,6 +409,29 @@ export class RuntimeRunner {
         new Set([...excludedSinkIds, ...error.failedSinkIds]),
       );
     }
+  }
+
+  /**
+   * 为已开始但无法取得结果的调用提交 tool.outcome_unknown（模型可见合成结果）。
+   * 这是「结果确实未知」的唯一显式事件路径；有副作用工具不得自动重试。
+   */
+  async #recordOutcomeUnknown(
+    state: RunState,
+    context: ExecutionContext,
+    call: Readonly<ToolCall>,
+    reason: ToolOutcomeUnknownReason,
+  ): Promise<RunState> {
+    // 工具执行前 tool.started 已通过 required ACK，eventId 必然已记录；
+    // 缺失说明执行屏障被破坏，属于内部不变量错误。
+    const recordedCallEventId = context.toolStartedEventIds.get(call.callId);
+    if (!recordedCallEventId) {
+      throw new Error(
+        `调用 ${call.callId} 缺少已提交的 tool.started 事件，无法记录 outcome_unknown`,
+      );
+    }
+    return this.#commit(state, context, "tool.outcome_unknown", {
+      ...outcomeUnknownPayload(call, reason, this.#toolEffectClass(call), recordedCallEventId),
+    });
   }
 
   async #terminateForLimit(
@@ -650,6 +704,8 @@ export class RuntimeRunner {
         const toolLimit = this.#limitGuard.beforeTool(state);
         if (toolLimit) return this.#terminateForLimit(state, context, toolLimit);
         state = await this.#commit(state, context, "tool.started", { call });
+        // 启动事实未落盘（required sink 失败已降级为 run.failed）时不得启动副作用。
+        if (isTerminalRunStatus(state.status)) return state;
       }
       const executions = calls.map(async (call) => {
         const raw = await this.#toolExecutor.execute(call, { signal: context.cancellation.signal });
@@ -657,28 +713,86 @@ export class RuntimeRunner {
         assertToolResultMatchesCall(call, parsed);
         return { call, result: parsed };
       });
-      let results: readonly { call: ToolCall; result: ToolResult }[];
-      try {
-        results =
-          group.mode === "parallel_read_only"
-            ? await Promise.all(executions)
-            : [await executions[0]!];
-      } catch (error) {
-        if (context.cancellation.signal.aborted) {
-          return this.#commit(state, context, "run.cancelled", {
-            reason: context.cancellation.reason ?? "caller_requested",
-          });
+      // 等待组内所有工具停止。有界 drain 只在「取消已经发生后」开始计时：
+      // 未取消的正常长工具必须遵从工具自身的超时（由执行器负责），不能被 Runner 提前判定失败；
+      // 取消发生后，对忽略 AbortSignal 且永不返回的工具，drain 超时后按「结果未知」处理，
+      // 保证 cancelled/outcome_unknown 能够落盘（内置工具由执行器信号/进程组终止）。
+      type SettledOutcome =
+        | { status: "fulfilled"; value: { call: ToolCall; result: ToolResult } }
+        | { status: "rejected"; reason: unknown };
+      const outcomeSlots: (SettledOutcome | undefined)[] = new Array(executions.length);
+      const allSettledSignal = Promise.all(
+        executions.map(
+          (execution, index) =>
+            new Promise<void>((resolve) => {
+              void execution.then(
+                (value) => {
+                  outcomeSlots[index] = { status: "fulfilled", value };
+                  resolve();
+                },
+                (reason) => {
+                  outcomeSlots[index] = { status: "rejected", reason };
+                  resolve();
+                },
+              );
+            }),
+        ),
+      );
+      const cancellationHappened = new Promise<void>((resolve) => {
+        if (context.cancellation.signal.aborted) resolve();
+        else context.cancellation.signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      let drained = true;
+      if (this.#toolDrainTimeoutMs > 0) {
+        // timer 必须清理：泄漏的 pending timer 会保持进程事件循环存活（CLI 无法退出）。
+        let drainTimer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          drained = await Promise.race([
+            allSettledSignal.then(() => true),
+            // 取消发生后才开始 drain 计时；未取消时该分支永不 resolve（工具自身超时兜底）。
+            cancellationHappened.then(
+              () =>
+                new Promise<boolean>((resolve) => {
+                  drainTimer = setTimeout(() => resolve(false), this.#toolDrainTimeoutMs);
+                  void allSettledSignal.then(() => resolve(true));
+                }),
+            ),
+          ]);
+        } finally {
+          clearTimeout(drainTimer);
         }
-        return this.#commit(state, context, "run.failed", {
-          failure: failure(
-            "tool_executor",
-            "tool_executor_rejected",
-            error instanceof Error ? error.message : "ToolExecutor 异常",
-          ),
-        });
+      } else {
+        await allSettledSignal;
+      }
+      const fulfilled: { call: ToolCall; result: ToolResult }[] = [];
+      const rejected: { call: ToolCall; error: unknown }[] = [];
+      for (let index = 0; index < calls.length; index += 1) {
+        const slot = outcomeSlots[index];
+        if (!slot) {
+          rejected.push({
+            call: calls[index]!,
+            error: new Error(
+              drained ? "tool_executor_hung" : `tool_drain_timeout(${this.#toolDrainTimeoutMs}ms)`,
+            ),
+          });
+        } else if (slot.status === "fulfilled") {
+          fulfilled.push(slot.value);
+        } else {
+          rejected.push({ call: calls[index]!, error: slot.reason });
+        }
       }
 
-      for (const { call, result: originalResult } of results) {
+      // 已 started 但未返回结果的调用：强制中断时先记录结构化 outcome_unknown。
+      if (context.cancellation.signal.aborted) {
+        for (const { call } of rejected) {
+          state = await this.#recordOutcomeUnknown(state, context, call, "cancelled_while_running");
+          if (isTerminalRunStatus(state.status)) return state;
+        }
+      }
+
+      // 结算已取得结果的调用（含协作式取消的 tool.cancelled）。
+      let cancelledByRequest = false;
+      for (const { call, result: originalResult } of fulfilled) {
         let result = originalResult;
         const afterTool = await this.#hooks.afterTool(state, result, context.cancellation.signal);
         if (afterTool.kind === "pause") {
@@ -694,9 +808,14 @@ export class RuntimeRunner {
         }
         if (result.status === "cancelled") {
           if (context.cancellation.signal.aborted) {
-            return this.#commit(state, context, "run.cancelled", {
-              reason: context.cancellation.reason ?? "caller_requested",
+            // 正常协作式取消：先持久化真实 cancelled ToolResult，最后统一提交 run.cancelled。
+            state = await this.#commit(state, context, "tool.cancelled", {
+              callId: call.callId,
+              result,
             });
+            if (isTerminalRunStatus(state.status)) return state;
+            cancelledByRequest = true;
+            continue;
           }
           result = cancelledToFailure(result);
         }
@@ -712,6 +831,22 @@ export class RuntimeRunner {
             result,
           });
         }
+        if (isTerminalRunStatus(state.status)) return state;
+      }
+      if (context.cancellation.signal.aborted || cancelledByRequest) {
+        // 取消事实（tool.cancelled / tool.outcome_unknown）已全部落盘后，才提交 run.cancelled。
+        return this.#commit(state, context, "run.cancelled", {
+          reason: context.cancellation.reason ?? "caller_requested",
+        });
+      }
+      if (rejected.length > 0) {
+        return this.#commit(state, context, "run.failed", {
+          failure: failure(
+            "tool_executor",
+            "tool_executor_rejected",
+            rejected[0]!.error instanceof Error ? rejected[0]!.error.message : "ToolExecutor 异常",
+          ),
+        });
       }
     }
     return state;

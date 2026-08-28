@@ -57,7 +57,9 @@ function settleToolBatch(
   const calls = batch.calls.map((call) =>
     call.requestedCall.callId === updatedCall.requestedCall.callId ? updatedCall : call,
   );
-  const settled = calls.every((call) => call.status === "completed" || call.status === "failed");
+  const settled = calls.every((call) =>
+    ["completed", "failed", "cancelled", "outcome_unknown"].includes(call.status),
+  );
   return {
     batch: settled ? null : { ...batch, calls },
     results: settled ? [...calls].sort((left, right) => left.ordinal - right.ordinal) : [],
@@ -70,7 +72,8 @@ function abandonUnsettledTools(batch: ToolBatchState | null): ToolBatchState | n
     ...batch,
     calls: batch.calls.map((call) => {
       if (call.status === "pending") return { ...call, status: "abandoned" as const };
-      if (call.status === "running") return { ...call, status: "result_unknown" as const };
+      // 已开始但 Run 结束前未取得结果的调用：结果未知（兜底标记，不携带伪造结果）。
+      if (call.status === "running") return { ...call, status: "outcome_unknown" as const };
       return call;
     }),
   };
@@ -82,11 +85,24 @@ function terminalState(
   status: "completed" | "cancelled" | "limit_exceeded" | "failed",
   outcome: RunOutcome,
 ): RunState {
+  const toolBatch = abandonUnsettledTools(state.toolBatch);
+  // 部分结算的批（settle 未完成时仍留在 toolBatch 中）可能已经带确定/合成结果：
+  // 终态前必须冲刷进 transcript，否则多组 ToolCall 下崩溃恢复时这些结果在状态层不可见。
+  const pendingResults = (toolBatch?.calls ?? [])
+    .filter((call) => call.result !== null)
+    .sort((left, right) => left.ordinal - right.ordinal)
+    .map((call) => ({
+      kind: "tool_result" as const,
+      callId: call.requestedCall.callId,
+      result: call.result!,
+    }));
   return {
     ...state,
     status,
     activeModelRequest: null,
-    toolBatch: abandonUnsettledTools(state.toolBatch),
+    toolBatch,
+    transcript:
+      pendingResults.length === 0 ? state.transcript : [...state.transcript, ...pendingResults],
     pause: null,
     outcome,
     endedAt: event.meta.occurredAt,
@@ -164,17 +180,30 @@ function applyEvent(state: RunState, event: AgentEvent): RunState {
       break;
     }
     case "tool.completed":
-    case "tool.failed": {
+    case "tool.failed":
+    case "tool.cancelled":
+    case "tool.outcome_unknown": {
       const batch = state.toolBatch;
       if (!batch) throw new ReducerError("state_invalid", `${event.type} 缺少 toolBatch`);
       const existing = batch.calls.find(
         (call) => call.requestedCall.callId === event.payload.callId,
       );
       if (!existing) throw new ReducerError("state_invalid", "工具结果找不到对应调用");
-      const result = event.payload.result;
+      const result =
+        event.type === "tool.outcome_unknown"
+          ? event.payload.synthesizedResult
+          : event.payload.result;
+      const status =
+        event.type === "tool.completed"
+          ? "completed"
+          : event.type === "tool.failed"
+            ? "failed"
+            : event.type === "tool.cancelled"
+              ? "cancelled"
+              : "outcome_unknown";
       const settled = settleToolBatch(batch, {
         ...existing,
-        status: event.type === "tool.completed" ? "completed" : "failed",
+        status,
         result,
       });
       next = {
