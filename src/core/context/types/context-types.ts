@@ -49,6 +49,8 @@ export const assistantMessageSchema = z
     messageId: nonEmptyIdSchema,
     role: z.literal("assistant"),
     content: z.string(),
+    /** Provider 可公开返回、且后续请求协议要求回传的推理内容。 */
+    reasoningContent: z.string().min(1).optional(),
   })
   .strict();
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ContextBuilderInput } from "../../src/core/context/builder/context-builder.js";
+import { DeterministicContextBuilder } from "../../src/core/context/builder/context-builder.js";
 import {
   ContextSelectionError,
   selectContext,
@@ -46,6 +47,34 @@ function toolGroup(messageId: string, callId: string): ContextBuilderInput["tran
       callId,
       result: { ...successResult, callId },
     },
+  ];
+}
+
+function multiToolGroup(
+  messageId: string,
+  callIds: readonly string[],
+): ContextBuilderInput["transcript"] {
+  return [
+    {
+      kind: "assistant_message",
+      message: {
+        schemaVersion: 1,
+        messageId,
+        role: "assistant",
+        content: "",
+      },
+      toolCalls: callIds.map((callId) => ({
+        schemaVersion: 1 as const,
+        callId,
+        name: "read",
+        arguments: { path: `${callId}.txt` },
+      })),
+    },
+    ...callIds.map((callId) => ({
+      kind: "tool_result" as const,
+      callId,
+      result: { ...successResult, callId },
+    })),
   ];
 }
 
@@ -164,6 +193,52 @@ describe("M2 Context SelectionPolicy", () => {
         new WeightedEstimator(),
       ),
     ).toThrowError(ContextSelectionError);
+  });
+
+  it("连续删除多个不同长度的历史组后仍保持 ToolCall/ToolResult 配对", () => {
+    const currentUser = input().transcript[0]!;
+    const source: ContextBuilderInput = {
+      ...input(),
+      additionalInstructions: [],
+      skills: [],
+      memories: [],
+      transcript: [
+        currentUser,
+        ...toolGroup("assistant-a", "call-a"),
+        ...toolGroup("assistant-b", "call-b"),
+        ...multiToolGroup("assistant-c", ["call-c1", "call-c2"]),
+      ],
+      tokenBudget: 40,
+    };
+
+    const selected = selectContext(source, new WeightedEstimator());
+    const request = new DeterministicContextBuilder().build(selected.input);
+
+    expect(selected.removed.filter((item) => item.kind === "transcript_group")).toEqual([
+      {
+        kind: "transcript_group",
+        id: "assistant-a",
+        source: "transcript",
+        reason: "budget",
+      },
+      {
+        kind: "transcript_group",
+        id: "assistant-b",
+        source: "transcript",
+        reason: "budget",
+      },
+    ]);
+    expect(request.messages.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+      "tool",
+    ]);
+    expect(
+      request.messages
+        .filter((message) => message.role === "tool")
+        .map((message) => message.callId),
+    ).toEqual(["call-c1", "call-c2"]);
   });
 
   it("估算器异常或返回非法值时 fail closed", () => {

@@ -26,6 +26,8 @@ export interface ProcessExecutionRequest {
   readonly timeoutMs: number;
   readonly outputLimitBytes: number;
   readonly signal: AbortSignal;
+  /** 探针等已知零业务副作用的命令可跳过工作区前后快照。 */
+  readonly captureWorkspaceEffects?: boolean;
 }
 
 export interface CapturedOutput {
@@ -43,6 +45,11 @@ export interface ProcessExecutionResult {
   readonly stderr: CapturedOutput;
   readonly effects: ToolEffects;
   readonly sandboxProfileVersion: string;
+  readonly timings: {
+    readonly snapshotBeforeMs: number;
+    readonly executionMs: number;
+    readonly snapshotAfterMs: number;
+  };
 }
 
 export interface ProcessSandboxOptions {
@@ -107,7 +114,7 @@ function captured(chunks: readonly Buffer[], totalBytes: number, limit: number):
  * 再以只读或空挂载覆盖；能力探测失败时绝不退化成宿主 shell。
  */
 export class ProcessSandbox {
-  static readonly PROFILE_VERSION = "bwrap-m3-v3";
+  static readonly PROFILE_VERSION = "bwrap-m3-v4";
   readonly #protectedPaths: readonly string[];
 
   constructor(
@@ -167,6 +174,7 @@ export class ProcessSandbox {
         timeoutMs: 5_000,
         outputLimitBytes: 1_024,
         signal: new AbortController().signal,
+        captureWorkspaceEffects: false,
       });
       if (canary.exitCode !== 0 || canary.timedOut) {
         const detail = canary.stderr.text.trim().slice(0, 256);
@@ -193,7 +201,10 @@ export class ProcessSandbox {
       return this.#notStartedResult(true, false, request.outputLimitBytes);
     }
     const cwd = normalizeWorkspacePath(request.cwd, true);
-    const before = await this.workspace.snapshot();
+    const captureWorkspaceEffects = request.captureWorkspaceEffects ?? true;
+    const beforeStartedAt = performance.now();
+    const before = captureWorkspaceEffects ? await this.workspace.snapshot() : null;
+    const snapshotBeforeMs = Math.max(0, performance.now() - beforeStartedAt);
     const rootCapability = await this.workspace.acquireRootHandleForProcess();
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
@@ -205,6 +216,7 @@ export class ProcessSandbox {
     let cancelled = false;
 
     let result: { exitCode: number | null; signal: NodeJS.Signals | null };
+    const executionStartedAt = performance.now();
     try {
       const args = await this.#arguments(request.command, cwd, rootCapability);
       result = await new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>(
@@ -262,21 +274,25 @@ export class ProcessSandbox {
     } finally {
       await rootCapability.close();
     }
+    const executionMs = Math.max(0, performance.now() - executionStartedAt);
 
-    const after = await this.workspace.snapshot();
-    const changedPaths = this.workspace.diff(before, after);
+    const afterStartedAt = performance.now();
+    const after = captureWorkspaceEffects ? await this.workspace.snapshot() : null;
+    const snapshotAfterMs = Math.max(0, performance.now() - afterStartedAt);
+    const changedPaths = before && after ? this.workspace.diff(before, after) : [];
+    const accepted = after ? await this.workspace.acceptAgentChanges(after, changedPaths) : null;
     const effects: ToolEffects =
       changedPaths.length > 0
         ? {
             sideEffect: "confirmed",
             changedPaths,
-            workspaceRevision: after.revision,
+            workspaceRevision: accepted?.revision ?? null,
             artifactRefs: [],
           }
         : {
             sideEffect: "possible",
             changedPaths: [],
-            workspaceRevision: after.revision,
+            workspaceRevision: accepted?.revision ?? null,
             artifactRefs: [],
           };
     return {
@@ -287,6 +303,7 @@ export class ProcessSandbox {
       stderr: captured(stderrChunks, stderrBytes, request.outputLimitBytes),
       effects,
       sandboxProfileVersion: this.profile.version,
+      timings: { snapshotBeforeMs, executionMs, snapshotAfterMs },
     };
   }
 
@@ -393,6 +410,7 @@ export class ProcessSandbox {
       stderr: captured([], 0, limit),
       effects: { sideEffect: "none", changedPaths: [], workspaceRevision: null, artifactRefs: [] },
       sandboxProfileVersion: this.profile.version,
+      timings: { snapshotBeforeMs: 0, executionMs: 0, snapshotAfterMs: 0 },
     };
   }
 }

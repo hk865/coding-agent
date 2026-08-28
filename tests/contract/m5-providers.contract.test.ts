@@ -97,6 +97,7 @@ describe("M5 Provider contracts", () => {
               choices: [
                 {
                   delta: {
+                    reasoning_content: "需要读取 package.json。",
                     tool_calls: [
                       {
                         index: 0,
@@ -134,32 +135,100 @@ describe("M5 Provider contracts", () => {
       stream: true,
       stream_options: { include_usage: true },
       max_tokens: 128,
-      thinking: { type: "disabled" },
+      thinking: { type: "enabled" },
     });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "reasoning_delta",
+        delta: "需要读取 package.json。",
+      }),
+    );
   });
 
-  it("DeepSeek thinking + ToolCall 在 Context 尚不保留 reasoning_content 时 fail closed", async () => {
+  it("DeepSeek thinking + ToolCall 会把上一轮 reasoning_content 随 ToolResult 回传", async () => {
     let transportCalls = 0;
+    let body: Readonly<Record<string, unknown>> | null = null;
     const client = new DeepSeekModelClient({
       model: "deepseek-v4-flash",
       thinking: "enabled",
       transport: {
-        async create() {
+        async create(candidate) {
           transportCalls += 1;
-          return fixture([]);
+          body = candidate;
+          return fixture([
+            {
+              choices: [
+                {
+                  delta: { reasoning_content: "工具结果表明文件存在。" },
+                  finish_reason: null,
+                },
+              ],
+            },
+            {
+              choices: [{ delta: { content: "读取完成" }, finish_reason: "stop" }],
+            },
+          ]);
         },
       },
     });
+    const followUpRequest: ModelRequest = {
+      ...request,
+      messages: [
+        request.messages[0]!,
+        {
+          role: "assistant",
+          messageId: "assistant-tool-call",
+          content: "",
+          reasoningContent: "先读取 package.json。",
+          toolCalls: [
+            {
+              schemaVersion: 1,
+              callId: "call-1",
+              name: "read",
+              arguments: { path: "package.json" },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          callId: "call-1",
+          result: {
+            schemaVersion: 1,
+            callId: "call-1",
+            status: "success",
+            output: [{ kind: "text", text: "{}" }],
+            effects: {
+              sideEffect: "none",
+              changedPaths: [],
+              workspaceRevision: null,
+              artifactRefs: [],
+            },
+          },
+        },
+      ],
+    };
 
-    const events = await collect(client.stream(request, { signal: new AbortController().signal }));
-    expect(transportCalls).toBe(0);
+    const events = await collect(
+      client.stream(followUpRequest, { signal: new AbortController().signal }),
+    );
+    expect(transportCalls).toBe(1);
     expect(validateModelEventSequence(events)).toEqual({ ok: true });
-    expect(events).toEqual([
-      expect.objectContaining({
-        type: "error",
-        error: expect.objectContaining({ code: "thinking_tool_calls_unsupported" }),
-      }),
-    ]);
+    expect(body).toMatchObject({
+      thinking: { type: "enabled" },
+      messages: [
+        { role: "system" },
+        { role: "user" },
+        {
+          role: "assistant",
+          reasoning_content: "先读取 package.json。",
+          tool_calls: [expect.objectContaining({ id: "call-1" })],
+        },
+        { role: "tool", tool_call_id: "call-1" },
+      ],
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "reasoning_delta", delta: "工具结果表明文件存在。" }),
+    );
   });
 
   it("Registry 固定 openai/deepseek，未知 Provider fail closed", () => {

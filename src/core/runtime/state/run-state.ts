@@ -115,9 +115,13 @@ export const transcriptEntrySchema = z.discriminatedUnion("kind", [
       toolCalls: z.array(toolCallSchema).readonly(),
     })
     .strict()
-    .refine((value) => value.message.content.length > 0 || value.toolCalls.length > 0, {
-      message: "assistant transcript entry 不能同时缺少文本和工具调用",
-    }),
+    .refine(
+      (value) =>
+        value.message.content.length > 0 ||
+        value.toolCalls.length > 0 ||
+        (value.message.reasoningContent?.length ?? 0) > 0,
+      { message: "assistant transcript entry 不能同时缺少文本、推理内容和工具调用" },
+    ),
   z
     .object({
       kind: z.literal("tool_result"),

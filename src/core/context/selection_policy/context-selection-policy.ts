@@ -67,10 +67,18 @@ export function estimateTokens(
   }
 }
 
-interface TranscriptGroup {
-  readonly id: string;
-  readonly indexes: readonly number[];
-}
+type TranscriptGroup =
+  | {
+      readonly kind: "user_message";
+      readonly id: string;
+      readonly messageId: string;
+    }
+  | {
+      readonly kind: "assistant_tool_exchange";
+      readonly id: string;
+      readonly messageId: string;
+      readonly callIds: readonly string[];
+    };
 
 /**
  * assistant 与其完整 ToolResult 必须作为一个整体淘汰；当前用户消息和未闭合调用永不移除。
@@ -81,26 +89,58 @@ function removableTranscriptGroups(transcript: readonly TranscriptEntry[]): Tran
   for (let index = 0; index < transcript.length; index += 1) {
     const entry = transcript[index]!;
     if (entry.kind === "user_message") {
-      if (index !== latestUserIndex) groups.push({ id: entry.message.messageId, indexes: [index] });
+      if (index !== latestUserIndex) {
+        groups.push({
+          kind: "user_message",
+          id: entry.message.messageId,
+          messageId: entry.message.messageId,
+        });
+      }
       continue;
     }
     if (entry.kind !== "assistant_message") continue;
     const expected = new Set(entry.toolCalls.map((call) => call.callId));
-    const indexes = [index];
     let cursor = index + 1;
     while (cursor < transcript.length && transcript[cursor]?.kind === "tool_result") {
       const result = transcript[cursor] as Extract<TranscriptEntry, { kind: "tool_result" }>;
       if (!expected.has(result.callId)) break;
-      indexes.push(cursor);
       expected.delete(result.callId);
       cursor += 1;
     }
     if (expected.size === 0 && entry.toolCalls.length > 0) {
-      groups.push({ id: entry.message.messageId, indexes });
+      groups.push({
+        kind: "assistant_tool_exchange",
+        id: entry.message.messageId,
+        messageId: entry.message.messageId,
+        callIds: entry.toolCalls.map((call) => call.callId),
+      });
     }
     index = cursor - 1;
   }
   return groups;
+}
+
+/**
+ * 通过稳定业务标识删除完整交换，而不是复用会随前一次删除漂移的数组下标。
+ * assistant messageId 与它声明的 callId 集合共同定义一个原子裁剪单位。
+ */
+function withoutTranscriptGroup(
+  transcript: readonly TranscriptEntry[],
+  group: TranscriptGroup,
+): TranscriptEntry[] {
+  if (group.kind === "user_message") {
+    return transcript.filter(
+      (entry) => entry.kind !== "user_message" || entry.message.messageId !== group.messageId,
+    );
+  }
+  const callIds = new Set(group.callIds);
+  return transcript.filter((entry) => {
+    if (entry.kind === "assistant_message") {
+      return entry.message.messageId !== group.messageId;
+    }
+    if (entry.kind === "tool_result") return !callIds.has(entry.callId);
+    return true;
+  });
 }
 
 function removalOrder<T extends { readonly priority: number; readonly id: string }>(
@@ -165,8 +205,7 @@ export function selectContext(
   }
   for (const group of removableTranscriptGroups(transcript)) {
     if (estimatedTokens <= input.tokenBudget) break;
-    const removedIndexes = new Set(group.indexes);
-    transcript = transcript.filter((_, index) => !removedIndexes.has(index));
+    transcript = withoutTranscriptGroup(transcript, group);
     removed.push({
       kind: "transcript_group",
       id: group.id,

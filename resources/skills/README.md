@@ -1,10 +1,10 @@
 # Skill Resources
 
 ```yaml
-implementation: NOT_IMPLEMENTED
+implementation: IMPLEMENTED
 scope: M5
-current_stage: M4_COMPLETE
-updated: 2026-08-26
+current_stage: M6_ACCEPTANCE
+updated: 2026-08-27
 ```
 
 ## 职责与边界
@@ -15,7 +15,8 @@ Skill 内容只是待选择的 instruction 或 reference data，不能直接执�
 
 ## 当前状态
 
-截至 M4，本目录只有本 README，尚无 Skill fixture、manifest 或版本 schema。
+当前提供并默认启用两个固定 Skill：`coding-safety` instruction 与 `project-conventions`
+reference。FileSkillLoader 校验 manifest、普通文件、大小、ID 和内容摘要后再注入 ContextBuilder。
 
 ## M5 计划
 

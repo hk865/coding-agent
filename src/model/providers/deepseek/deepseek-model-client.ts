@@ -64,6 +64,7 @@ function mapMessages(request: ModelRequest): readonly Record<string, unknown>[] 
       messages.push({
         role: "assistant",
         content: message.content || null,
+        ...(message.reasoningContent ? { reasoning_content: message.reasoningContent } : {}),
         ...(message.toolCalls.length > 0
           ? {
               tool_calls: message.toolCalls.map((call) => ({
@@ -113,10 +114,11 @@ export class DeepSeekModelClient implements ModelClientPort {
 
   constructor(options: Readonly<DeepSeekModelClientOptions>) {
     if (options.model.trim().length === 0) throw new Error("DeepSeek model 不能为空");
-    if (options.reasoningEffort && options.thinking !== "enabled") {
+    const thinking = options.thinking ?? "enabled";
+    if (options.reasoningEffort && thinking !== "enabled") {
       throw new Error("reasoningEffort 只可在 thinking=enabled 时使用");
     }
-    this.#options = { ...options, thinking: options.thinking ?? "disabled" };
+    this.#options = { ...options, thinking };
   }
 
   async *stream(
@@ -125,17 +127,6 @@ export class DeepSeekModelClient implements ModelClientPort {
   ): AsyncIterable<ModelEvent> {
     const request = modelRequestSchema.parse(candidate);
     const event = createEventFactory(request.requestId);
-    if (this.#options.thinking === "enabled" && request.tools.length > 0) {
-      yield event({
-        type: "error",
-        error: {
-          code: "thinking_tool_calls_unsupported",
-          message: "当前 Context 协议不保留 reasoning_content，拒绝 DeepSeek thinking + ToolCall",
-          retryable: false,
-        },
-      });
-      return;
-    }
     const body: Record<string, unknown> = {
       model: this.#options.model,
       messages: mapMessages(request),
@@ -164,6 +155,10 @@ export class DeepSeekModelClient implements ModelClientPort {
         if (!choice) throw new Error("DeepSeek choice 非法");
         const delta = asRecord(choice["delta"]);
         if (delta) {
+          const reasoningContent = stringField(delta, "reasoning_content");
+          if (reasoningContent) {
+            yield event({ type: "reasoning_delta", delta: reasoningContent });
+          }
           const content = stringField(delta, "content");
           if (content) yield event({ type: "text_delta", delta: content });
           const toolCalls = delta["tool_calls"];

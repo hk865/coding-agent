@@ -10,6 +10,11 @@ scope: M6 质量门禁、canary、结果协议、安全验收和剩余外部环�
 
 - `npm run check` 已纳入格式、ESLint、strict typecheck、全部测试、build、架构检查和 benchmark
   preflight；
+- 本机 Web
+  Session 已从简单状态文本升级为已提交事件投影，展示模型/工具轨迹、Token、缓存、整轮TPS、工具次数、模型轮次、耗时、上下文占用和精确失败码；
+- 修复真实 Session `e21dd629-c7b2-4906-8867-ea5856890bed`
+  暴露的连续历史裁剪下标漂移：默认上下文窗口改为1M，裁剪改用稳定 `messageId + callId[]`
+  分组，并加入 Runtime 全链路业务回归；
 - 新增真实 CLI child-process 固定回放：本地 DeepSeek-compatible SSE 驱动
   `read → final`、非交互 edit 拒绝和模型等待期间 SIGINT；
 - 修复 SIGINT 竞态：调用方取消现在优先产生唯一 `run.cancelled`，CLI 稳定退出 130；
@@ -30,9 +35,10 @@ scope: M6 质量门禁、canary、结果协议、安全验收和剩余外部环�
 - 真实 baseline 现在拒绝 dirty worktree，并复用生产支持的绝对
   `CODING_AGENT_BWRAP_PATH`；避免把旧 commit 或缺少系统 bwrap 误记为可信成绩；
 - 真实 baseline 排障修复了三个旧架构稳定性问题：模型侧 Tool
-  schema 使用跨 Provider 保守子集且保持 object 根；DeepSeek 默认固定 `thinking=disabled`
-  并拒绝无法可靠恢复的 thinking + ToolCall；Runtime `elapsedMs` 在墙钟回拨时保持单调，sandbox
-  profile `bwrap-m3-v3` 禁止 Python 字节码缓存污染工作区；
+  schema 使用跨 Provider 保守子集且保持 object 根；当时 DeepSeek 临时固定
+  `thinking=disabled`；Runtime `elapsedMs` 在墙钟回拨时保持单调，sandbox profile `bwrap-m3-v3`
+  禁止 Python 字节码缓存污染工作区。当前协议已进一步支持保存并回传
+  `reasoning_content`，因此生产 Web 默认启用 thinking + ToolCall；
 - benchmark 子进程耗时改用单调时钟，metrics 层仍将异常负值 fail
   safe 为 0，避免系统校时污染严格结果 schema；
 - 稳定基线已提交为 `a91cde6` 并推送到 GitHub `main`。

@@ -4,7 +4,7 @@
 
 工程具备可运行 Agent Loop、read/edit/shell 安全工具链、append-only
 Session、Checkpoint、SQLite 持久化、OpenAI/DeepSeek 显式 Provider、Skill/Empty
-Memory 边界、最小 CLI，以及可重复的 4-task canary
+Memory 边界、CLI、本机 Web UI，以及可重复的 4-task canary
 harness。Provider 不自动路由或 fallback；密钥只从所选 Provider 的秘密来源注入。
 
 下一阶段为什么要增加 AgentDriver、Inbox、不可变 Profile 和多种状态投影，见
@@ -18,6 +18,22 @@ harness。Provider 不自动路由或 fallback；密钥只从所选 Provider 的
 - npm
 
 首次安装和命令说明见 [`docs/development/getting-started.md`](docs/development/getting-started.md)。
+
+## 本机 Web UI
+
+完成依赖安装后运行：
+
+```bash
+npm run web
+```
+
+浏览器打开 `http://127.0.0.1:4173`。页面集中提供 workspace、Provider、model、Session、API
+Key、任务输入、流式回答、风险操作审批、取消和异常恢复。服务拒绝监听非回环地址；API
+Key 不写入配置、Session、日志或浏览器存储。shell 仍必须通过 bubblewrap 隔离能力检查。
+
+当前运行时间线还展示版本化系统提示、启用的 Tool/Skill、DeepSeek 逐轮
+`reasoning_content`、按模型请求分组的流式 Markdown 中间回复/最终回答、可展开工具输入/结果、Token/缓存、整轮 TPS、模型轮次与工具次数的当前值/上限、耗时和 1M默认上下文窗口占用。风险操作支持允许一次、本任务允许同名工具或拒绝；硬拒绝规则与 Sandbox 始终生效。测试与真实业务的逐层对应见
+[`Web UI、长会话故障与真实业务测试说明`](docs/testing/web-ui-business-verification.md)。
 
 ## 工程门禁
 
@@ -39,11 +55,11 @@ npm run benchmark:baseline:replay
 - `core`：Run/Turn/State/Event、Model/Tool/Store/Skill/Memory
   Ports、Context、Hook、Limit、Cancellation；
 - `core/runtime`：Reducer、Agent Loop、模型流协议、工具闭环、required sink、Checkpoint 和恢复协调；
-- `tools`、`policy`、`sandbox`：Registry/Dispatcher、read/edit/shell、Permission/Approval、Workspace/Process
+- `tools`、`policy`、`sandbox`：Registry/Dispatcher、read/check/edit/shell、Permission/Approval、Workspace/Process
   Sandbox；
 - `storage`：InMemory/SQLite Store、append-only Session、幂等/冲突控制、跨进程恢复；
 - `model/providers`：OpenAI Responses 与 DeepSeek Chat Completions Adapter、静态 Registry；
-- `app`：strict 配置、Composition Root、`coding-agent run/resume` CLI；
+- `app`：strict 配置、Composition Root、`coding-agent run/resume` CLI、本机 Web UI；
 - `skills`、`memory`：固定资源 Loader/Registry 与无隐藏状态的 Empty Memory；
 - `benchmarks`：strict
   schema、7 类结果、4 个 canary、base/oracle/near-miss 预检、trace/diff/evaluator artifact；

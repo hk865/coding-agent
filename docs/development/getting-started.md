@@ -22,12 +22,26 @@ npm ci
 | `npm run test`                      | build 后运行全部确定性测试与本机可用 E2E |
 | `npm run test:e2e:bwrap`            | 强制真实 bubblewrap E2E                  |
 | `npm run build`                     | 编译 `src` 到 `dist`                     |
+| `npm run web`                       | 构建并启动本机 Web UI                    |
 | `npm run check:architecture`        | 依赖方向与循环检查                       |
 | `npm run benchmark:validate`        | 4 个 canary 预检                         |
 | `npm run benchmark:baseline:replay` | 生成固定 replay 结果                     |
 | `npm run smoke:providers`           | 真实 Provider 文本与无副作用 ToolCall    |
 | `npm run benchmark:baseline:real`   | 真实模型执行 4 个 canary                 |
 | `npm run check`                     | 完整本地确定性门禁                       |
+
+## 本机 Web UI
+
+```bash
+npm run web
+```
+
+然后打开 `http://127.0.0.1:4173`。页面允许直接填写 workspace、Provider、model、Session、API
+Key 和任务；Agent 的流式文本、edit/shell 审批、取消及最终状态均在同一页面完成。
+
+Web 服务固定监听 `127.0.0.1`。API
+Key 只用于当前任务，不写入 Session、日志或浏览器存储；刷新页面后需要重新填写。如果仓库自带
+`.tooling/bwrap/usr/bin/bwrap`，Web 入口会自动使用；否则 shell 工具按既有策略 fail closed。
 
 ## 当前能力
 

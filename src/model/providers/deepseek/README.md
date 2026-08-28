@@ -28,8 +28,11 @@ resolved，`resolvedAt1=1`，所有错误类别均为 0。
 - 使用稳定 provider ID `deepseek` 和 `DEEPSEEK_API_KEY`，只连接官方 endpoint。
 - 把 ModelRequest 与 `read`、`edit`、`shell` schema 映射为 Chat Completions messages/function
   tools。
-- 默认显式发送 `thinking=disabled`；在 Context 尚不能保留 `reasoning_content` 时，
-  `thinking=enabled + ToolCall` 联网前 fail closed。
+- 默认显式发送 `thinking=enabled`，把流式 `reasoning_content` 映射为独立 `reasoning_delta`；Web
+  UI 可逐轮展示 Provider 公开的推理内容。
+- assistant 完成时将完整 `reasoning_content`
+  写入版本化消息；ToolResult 后的下一次请求会随原 assistant ToolCall 原样回传，符合 DeepSeek
+  thinking + ToolCall 协议。
 - 模型侧工具 schema 使用跨 Provider 保守子集；运行时继续使用原始 Zod schema 严格校验。
 - 把文本、ToolCall 参数、usage、finish reason、错误和取消映射为 ModelEvent。
 - 通过共享 ModelClientPort contract、DeepSeek 专属 fixture 和受控人工 smoke。
@@ -43,4 +46,5 @@ resolved，`resolvedAt1=1`，所有错误类别均为 0。
 
 - 新增 DeepSeek 不修改 RuntimeRunner 或 Core public types。
 - ToolCall 流、usage、截断、错误、取消和未知协议事件均有确定性测试。
-- 凭据、完整正文、reasoning content 和 Tool 参数不泄漏到日志或 Session。
+- 凭据不进入日志或 Session；正文、reasoning
+  content 和 Tool 参数作为可恢复、可审计的任务事实进入本机 Session，并在 Web UI 中有界展示。

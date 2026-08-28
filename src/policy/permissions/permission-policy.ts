@@ -101,6 +101,9 @@ export class DefaultPermissionPolicy {
     if (operation.effectClass === "read_only" && operation.tool === "read") {
       return this.#decision("allow", "workspace_read", "允许读取 workspace 文件", operation);
     }
+    if (operation.effectClass === "read_only" && operation.tool === "check") {
+      return this.#decision("allow", "workspace_check", "允许对账 workspace 状态", operation);
+    }
     if (operation.effectClass === "workspace_write" && operation.tool === "edit") {
       if (operation.paths.some((path) => isWithin(path, ".git"))) {
         return this.#decision("deny", "git_write_denied", "不允许修改版本库内部数据", operation);

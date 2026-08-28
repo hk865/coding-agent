@@ -17,9 +17,17 @@ import type { ToolDefinition, ToolHandler } from "../../schemas/tool-schemas.js"
 
 export const shellToolInputSchema = z
   .object({
-    command: z.string().min(1),
-    cwd: z.string().optional(),
-    timeoutMs: z.number().int().positive().optional(),
+    command: z.string().min(1).describe("Non-interactive bash command to run"),
+    cwd: z
+      .string()
+      .optional()
+      .describe("Workspace-relative working directory; defaults to workspace root"),
+    timeoutMs: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Timeout in milliseconds, capped by the runtime"),
   })
   .strict();
 
@@ -84,6 +92,7 @@ export class ShellToolHandler implements ToolHandler {
               truncated: result.stderr.truncated,
             },
             sandboxProfileVersion: result.sandboxProfileVersion,
+            timings: result.timings,
           },
         },
       ];
@@ -166,7 +175,8 @@ export class ShellToolHandler implements ToolHandler {
 export function createShellToolDefinition(sandbox: ProcessSandbox): ToolDefinition {
   return {
     name: "shell",
-    description: "在无网络 bubblewrap 隔离环境中运行非交互 bash 命令",
+    description:
+      "Run a non-interactive bash command in a network-disabled bubblewrap sandbox. Use for search, builds, and tests—not for file reading or editing when read/edit applies. The workspace is /workspace inside shell; cwd is workspace-relative. Group related checks to avoid many tiny calls. Requires user permission.",
     inputSchema: shellToolInputSchema,
     handler: new ShellToolHandler(sandbox),
     effectClass: "process",

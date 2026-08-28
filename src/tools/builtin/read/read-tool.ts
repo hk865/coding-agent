@@ -17,10 +17,13 @@ import type { ToolDefinition, ToolHandler } from "../../schemas/tool-schemas.js"
 
 export const readToolInputSchema = z
   .object({
-    path: z.string().min(1),
-    startLine: z.number().int().positive().optional(),
-    endLine: z.number().int().positive().optional(),
-    maxBytes: z.number().int().positive().optional(),
+    path: z
+      .string()
+      .min(1)
+      .describe("Workspace-relative file or directory path, for example README.md; never absolute"),
+    startLine: z.number().int().positive().optional().describe("First line to return, 1-based"),
+    endLine: z.number().int().positive().optional().describe("Last line to return, inclusive"),
+    maxBytes: z.number().int().positive().optional().describe("Maximum source bytes to read"),
   })
   .strict()
   .refine(
@@ -147,7 +150,8 @@ export class ReadToolHandler implements ToolHandler {
 export function createReadToolDefinition(workspace: WorkspaceSandbox): ToolDefinition {
   return {
     name: "read",
-    description: "读取 workspace 内的 UTF-8 文本文件，可指定行范围",
+    description:
+      "Read a UTF-8 file or list a directory inside the workspace. Path must be workspace-relative (README.md, never /workspace/README.md or a host path). Prefer this tool over shell cat/ls; use line ranges for large files.",
     inputSchema: readToolInputSchema,
     handler: new ReadToolHandler(workspace),
     effectClass: "read_only",

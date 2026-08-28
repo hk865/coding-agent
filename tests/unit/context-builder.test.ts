@@ -75,6 +75,7 @@ function input(): ContextBuilderInput {
           messageId: "message-assistant",
           role: "assistant",
           content: "",
+          reasoningContent: "需要先读取 README，再根据文件内容回答。",
         },
         toolCalls: [
           { schemaVersion: 1, callId: "call-read", name: "read", arguments: { path: "README.md" } },
@@ -110,6 +111,10 @@ describe("M1-04 ContextBuilder boundary", () => {
       request.systemPrompt.indexOf("memory_data"),
     );
     expect(request.messages.map((message) => message.role)).toEqual(["user", "assistant", "tool"]);
+    expect(request.messages[1]).toMatchObject({
+      role: "assistant",
+      reasoningContent: "需要先读取 README，再根据文件内容回答。",
+    });
     expect(request.tools.map((tool) => tool.name)).toEqual(["read", "shell"]);
     expect(source).toEqual(snapshot);
     expect(buildModelRequest(source)).toEqual(request);

@@ -31,7 +31,7 @@ export interface ContextBuilderInput {
   readonly tools: readonly ModelToolSpec[];
   readonly skills: readonly SkillContext[];
   readonly memories: readonly MemoryItem[];
-  /** M1 只传递并校验预算；真正的裁剪由 M2 SelectionPolicy 负责。 */
+  /** 模型最大上下文窗口；真正的超窗裁剪由 M2 SelectionPolicy 负责。 */
   readonly tokenBudget: number;
   readonly maxOutputTokens: number | null;
 }
@@ -127,6 +127,9 @@ function toModelMessages(transcript: readonly TranscriptEntry[]): readonly Model
         role: "assistant",
         messageId: item.message.messageId,
         content: item.message.content,
+        ...(item.message.reasoningContent
+          ? { reasoningContent: item.message.reasoningContent }
+          : {}),
         toolCalls: item.toolCalls,
       };
     }

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { appConfigSchema } from "../../src/app/composition/app-config.js";
 import { runCodingAgent } from "../../src/app/composition/composition-root.js";
+import type { AppRuntimeConfiguration } from "../../src/app/composition/composition-root.js";
 import type {
   ModelClientPort,
   ModelEvent,
@@ -24,13 +25,20 @@ class ReplayModelClient implements ModelClientPort {
       schemaVersion: 1,
       requestId: request.requestId,
       sequence: 1,
+      type: "reasoning_delta",
+      delta: "先确认组合层与持久化边界。",
+    };
+    yield {
+      schemaVersion: 1,
+      requestId: request.requestId,
+      sequence: 2,
       type: "text_delta",
       delta: "M5 replay ok",
     };
     yield {
       schemaVersion: 1,
       requestId: request.requestId,
-      sequence: 2,
+      sequence: 3,
       type: "usage_snapshot",
       usage: {
         inputTokens: 10,
@@ -42,7 +50,7 @@ class ReplayModelClient implements ModelClientPort {
     yield {
       schemaVersion: 1,
       requestId: request.requestId,
-      sequence: 3,
+      sequence: 4,
       type: "completed",
       reason: "final_answer",
     };
@@ -80,6 +88,10 @@ describe("M5 Composition smoke", () => {
     });
     const requestedSecrets: string[] = [];
     let output = "";
+    let reasoning = "";
+    let textRequestId = "";
+    let reasoningRequestId = "";
+    let runtimeConfiguration: AppRuntimeConfiguration | null = null;
     const result = await runCodingAgent({
       config,
       workspaceRoot: workspace.root,
@@ -92,8 +104,16 @@ describe("M5 Composition smoke", () => {
           return "fixture-secret-never-persist";
         },
       },
-      onTextDelta: (delta) => {
+      onTextDelta: (delta, requestId) => {
         output += delta;
+        textRequestId = requestId;
+      },
+      onReasoningDelta: (delta, requestId) => {
+        reasoning += delta;
+        reasoningRequestId = requestId;
+      },
+      onConfiguration: (configuration) => {
+        runtimeConfiguration = configuration;
       },
     });
     expect(result.state.status).toBe("completed");
@@ -101,6 +121,27 @@ describe("M5 Composition smoke", () => {
     expect(result.enabledTools).toEqual(["read", "edit", "shell"]);
     expect(requestedSecrets).toEqual(["DEEPSEEK_API_KEY"]);
     expect(output).toBe("M5 replay ok");
+    expect(reasoning).toBe("先确认组合层与持久化边界。");
+    expect(textRequestId).not.toBe("");
+    expect(reasoningRequestId).toBe(textRequestId);
+    expect(runtimeConfiguration).toMatchObject({
+      systemPromptVersion: "coding-agent-v3",
+      tools: expect.arrayContaining([
+        expect.objectContaining({
+          name: "read",
+          description: expect.stringContaining("workspace-relative"),
+        }),
+        expect.objectContaining({ name: "edit" }),
+        expect.objectContaining({ name: "shell" }),
+      ]),
+      skills: expect.arrayContaining([
+        expect.objectContaining({ id: "coding-safety", content: expect.any(String) }),
+      ]),
+    });
+    expect(result.state.transcript.at(-1)).toMatchObject({
+      kind: "assistant_message",
+      message: { reasoningContent: "先确认组合层与持久化边界。" },
+    });
 
     const store = await SqliteStores.open(databasePath);
     try {
@@ -117,6 +158,7 @@ describe("M5 Composition smoke", () => {
         "agent.event",
       ]);
       expect(JSON.stringify(page.records)).not.toContain("fixture-secret-never-persist");
+      expect(JSON.stringify(page.records)).toContain("先确认组合层与持久化边界。");
     } finally {
       await store.close();
     }

@@ -11,6 +11,8 @@ scope: 当前自动测试覆盖、跨进程证据和真实隔离门禁
 - M2：model→tool→model、请求重试与
   `retryOfRequestId`、usage、模型流乱序/事件上限、上下文闭合组裁剪、Hook 修改后二次预算、只读并行回填顺序、取消、模型/工具限制、Hook
   pause/resume；
+- M2：真实长会话拓扑连续删除多个不同长度的 assistant/tool 交换，使用稳定 `messageId + callId[]`
+  保持配对，并在下一轮真实 ContextBuilder/Runtime 请求中完成而不是产生孤立 ToolResult；
 - M2：required sink 多失败协调与超时、健康 required sink
   sequence 连续、best-effort 失败不改变业务终态；
 - M3：路径穿越、最终文件和中间目录 symlink、fd 锚定访问、审批拒绝零副作用、审批等待期间 revision 变化、原子 edit、文件/workspace

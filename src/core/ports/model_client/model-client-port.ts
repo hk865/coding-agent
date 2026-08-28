@@ -22,12 +22,19 @@ export const modelMessageSchema = z.discriminatedUnion("role", [
       role: z.literal("assistant"),
       messageId: nonEmptyIdSchema,
       content: z.string(),
+      reasoningContent: z.string().min(1).optional(),
       toolCalls: z.array(toolCallSchema).readonly(),
     })
     .strict()
-    .refine((value) => value.content.length > 0 || value.toolCalls.length > 0, {
-      message: "assistant message 不能同时缺少文本和工具调用",
-    }),
+    .refine(
+      (value) =>
+        value.content.length > 0 ||
+        value.toolCalls.length > 0 ||
+        (value.reasoningContent?.length ?? 0) > 0,
+      {
+        message: "assistant message 不能同时缺少文本、推理内容和工具调用",
+      },
+    ),
   z
     .object({
       role: z.literal("tool"),
@@ -80,6 +87,9 @@ const eventBase = {
 
 const textDeltaEventSchema = z
   .object({ ...eventBase, type: z.literal("text_delta"), delta: z.string().min(1) })
+  .strict();
+const reasoningDeltaEventSchema = z
+  .object({ ...eventBase, type: z.literal("reasoning_delta"), delta: z.string().min(1) })
   .strict();
 const toolCallStartedEventSchema = z
   .object({
@@ -135,6 +145,7 @@ const modelCancelledEventSchema = z
 
 export const modelEventSchema = z.discriminatedUnion("type", [
   textDeltaEventSchema,
+  reasoningDeltaEventSchema,
   toolCallStartedEventSchema,
   toolArgumentsDeltaEventSchema,
   usageSnapshotEventSchema,

@@ -45,6 +45,8 @@ import {
   replaySessionRecords,
 } from "../../../core/ports/session_store/session-projection.js";
 
+type SessionProjection = ReturnType<typeof replaySessionRecords>;
+
 type Row = Record<string, unknown>;
 
 function cancelled(options: Readonly<StoreCallOptions>): void {
@@ -85,6 +87,10 @@ function draftMatches(
  */
 export class SqliteStores implements SessionStorePort, CheckpointStorePort {
   readonly #database: DatabaseSync;
+  readonly #projectionCache = new Map<
+    string,
+    { readonly revision: number; readonly state: SessionProjection }
+  >();
   #closed = false;
 
   private constructor(database: DatabaseSync) {
@@ -113,7 +119,7 @@ export class SqliteStores implements SessionStorePort, CheckpointStorePort {
   ): Promise<SessionHeader> {
     this.#assertOpen();
     cancelled(options);
-    return this.#transaction(() => {
+    const header = this.#transaction(() => {
       if (this.#sessionRow(input.sessionId))
         throw new StoreError("already_exists", "Session 已存在");
       const content = {
@@ -147,6 +153,8 @@ export class SqliteStores implements SessionStorePort, CheckpointStorePort {
       cancelled(options);
       return clone(header);
     });
+    this.#projectionCache.set(input.sessionId, { revision: header.revision, state: null });
+    return header;
   }
 
   async append(
@@ -167,7 +175,9 @@ export class SqliteStores implements SessionStorePort, CheckpointStorePort {
     if (new Set(drafts.map((draft) => draft.recordId)).size !== drafts.length) {
       throw new StoreError("invalid_record", "batch recordId 重复");
     }
-    return this.#transaction(() => {
+    let nextProjection:
+      { readonly revision: number; readonly state: SessionProjection } | undefined;
+    const result = this.#transaction(() => {
       const header = this.#header(sessionId);
       const existing = drafts.map((draft) => this.#recordById(draft.recordId));
       if (existing.every((record) => record !== null)) {
@@ -186,15 +196,19 @@ export class SqliteStores implements SessionStorePort, CheckpointStorePort {
       }
       if (header["revision"] !== expectedRevision)
         throw new StoreError("conflict", "Session revision 冲突");
-      const committed = this.#allRecords(sessionId);
-      let state = replaySessionRecords(committed);
+      const cached = this.#projectionCache.get(sessionId);
+      const committed =
+        cached?.revision === header["revision"] ? null : this.#allRecords(sessionId);
+      let state =
+        cached?.revision === header["revision"] ? cached.state : replaySessionRecords(committed!);
+      const committedCount = committed?.length ?? this.#recordCount(sessionId);
       const records: SessionRecord[] = [];
       for (const [index, draft] of drafts.entries()) {
         state = applySessionDraft(state, draft);
         const content = {
           ...draft,
           sessionId,
-          position: committed.length + index + 1,
+          position: committedCount + index + 1,
         };
         records.push(
           sessionRecordSchema.parse({
@@ -220,12 +234,15 @@ export class SqliteStores implements SessionStorePort, CheckpointStorePort {
           sessionId,
           expectedRevision,
         );
+      nextProjection = { revision, state };
       return {
         revision,
         positions: records.map((record) => record["position"]),
         records: clone(records),
       };
     });
+    if (nextProjection) this.#projectionCache.set(sessionId, nextProjection);
+    return result;
   }
 
   async read(
@@ -396,6 +413,7 @@ export class SqliteStores implements SessionStorePort, CheckpointStorePort {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    this.#projectionCache.clear();
     this.#database.close();
   }
 
@@ -510,6 +528,13 @@ export class SqliteStores implements SessionStorePort, CheckpointStorePort {
       assertSessionRecordChecksum(record);
       return record;
     });
+  }
+
+  #recordCount(sessionId: string): number {
+    const row = this.#database
+      .prepare("SELECT COUNT(*) AS count FROM session_records WHERE session_id=?")
+      .get(sessionId) as Row;
+    return Number(row["count"]);
   }
 
   #recordById(recordId: string): SessionRecord | null {

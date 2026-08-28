@@ -12,6 +12,7 @@
   },
   "scripts": {
     "start": "node dist/app/cli/main.js",
+    "web": "npm run build && node dist/app/web/main.js",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",

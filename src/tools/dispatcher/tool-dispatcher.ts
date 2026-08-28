@@ -40,6 +40,7 @@ export interface ToolDispatcherDependencies {
   readonly runId: string;
   readonly workspaceIdentity: string;
   readonly workspaceRevision: () => Promise<string>;
+  readonly reconcileBeforeApproval?: () => Promise<{ readonly changedPaths: readonly string[] }>;
   readonly sandboxProfileVersion: string;
 }
 
@@ -92,7 +93,9 @@ export class ToolDispatcher implements ToolExecutorPort {
         commandPreview: summary.commandPreview,
         capabilities: definition.requiredCapabilities,
         workspaceIdentity: this.dependencies.workspaceIdentity,
-        workspaceRevision: await this.dependencies.workspaceRevision(),
+        // allow/deny 的判定与 revision 无关；只有需要审批的操作才生成昂贵的
+        // workspace 指纹，并把该指纹写入审批 fingerprint。
+        workspaceRevision: "not-captured",
         sandboxProfileVersion: this.dependencies.sandboxProfileVersion,
       };
     } catch {
@@ -102,11 +105,42 @@ export class ToolDispatcher implements ToolExecutorPort {
     if (permission.decision === "deny") {
       return this.#error(call.callId, "permission_denied", permission.summary, NONE);
     }
+    const missing = definition.requiredCapabilities.filter(
+      (capability) => !this.dependencies.capabilities.has(capability),
+    );
+    if (missing.length > 0) {
+      return this.#error(call.callId, "sandbox_unavailable", "所需隔离能力不可用", NONE);
+    }
     if (permission.decision === "ask") {
       if (!this.dependencies.approval) {
         return this.#error(call.callId, "approval_denied", "操作需要审批", NONE);
       }
-      const approval = await this.dependencies.approval.authorize(permission, options.signal);
+      let approvalBoundPermission;
+      try {
+        const reconciliation = await this.dependencies.reconcileBeforeApproval?.();
+        if (reconciliation && reconciliation.changedPaths.length > 0) {
+          return this.#error(
+            call.callId,
+            "approval_denied",
+            "检测到非 Agent 工作区变动，请先 check 并重新读取相关文件",
+            NONE,
+          );
+        }
+        operation = {
+          ...operation,
+          workspaceRevision: await this.dependencies.workspaceRevision(),
+        };
+        approvalBoundPermission = this.dependencies.permissionPolicy.evaluate(operation);
+        if (approvalBoundPermission.decision !== "ask") {
+          return this.#error(call.callId, "permission_denied", "审批前策略状态异常", NONE);
+        }
+      } catch {
+        return this.#error(call.callId, "approval_denied", "无法确认 workspace 状态", NONE);
+      }
+      const approval = await this.dependencies.approval.authorize(
+        approvalBoundPermission,
+        options.signal,
+      );
       if (approval.kind === "cancelled") return this.#cancelled(call.callId, NONE);
       if (approval.kind !== "allowed") {
         return this.#error(call.callId, "approval_denied", approval.reason, NONE);
@@ -127,12 +161,6 @@ export class ToolDispatcher implements ToolExecutorPort {
       }
     }
     if (options.signal.aborted) return this.#cancelled(call.callId, NONE);
-    const missing = definition.requiredCapabilities.filter(
-      (capability) => !this.dependencies.capabilities.has(capability),
-    );
-    if (missing.length > 0) {
-      return this.#error(call.callId, "sandbox_unavailable", "所需隔离能力不可用", NONE);
-    }
     return this.#executeHandler(definition, call, options.signal);
   }
 

@@ -5,6 +5,7 @@
  * 关键流程：解析并验证相对路径，执行带并发保护的原子操作，再更新 workspace revision。
  */
 import { createHash, randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import { constants } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { link, lstat, open, readdir, realpath, rename, stat, unlink } from "node:fs/promises";
@@ -62,16 +63,58 @@ export interface WorkspaceWriteResult {
 
 export interface WorkspaceSnapshot {
   readonly revision: string;
+  readonly rootRevision: string;
   readonly files: ReadonlyMap<string, string>;
+  readonly strategy: "git_status_v1" | "sparse_metadata_v1";
+}
+
+export type WorkspaceConsistencyMode = "session" | "workspace" | "strict";
+
+export interface WorkspaceConsistencyReport {
+  readonly mode: WorkspaceConsistencyMode;
+  readonly scope: "session" | "workspace";
+  readonly status: "clean" | "drift_detected";
+  readonly checkedPaths: number;
+  readonly changedPaths: readonly string[];
+  readonly revision: string;
+  readonly revisionStrategy: WorkspaceSnapshot["strategy"] | "session_overlay_v1";
 }
 
 export interface WorkspaceSandboxOptions {
   readonly deniedPrefixes?: readonly string[];
+  /** 不参与恢复 revision 的可再生/体积型目录。 */
+  readonly snapshotIgnoredPrefixes?: readonly string[];
+  readonly consistencyMode?: WorkspaceConsistencyMode;
   readonly maxFileBytes?: number;
 }
 
+export const DEFAULT_WORKSPACE_SNAPSHOT_IGNORED_PREFIXES = [
+  ".git",
+  ".tooling",
+  "node_modules",
+  "dist",
+  "coverage",
+  "test-results",
+  ".cache",
+] as const;
+
 function hash(buffer: Uint8Array | string): string {
   return createHash("sha256").update(buffer).digest("hex");
+}
+
+function workspaceSnapshot(
+  strategy: WorkspaceSnapshot["strategy"],
+  rootRevision: string,
+  filesInput: ReadonlyMap<string, string>,
+): WorkspaceSnapshot {
+  const files = new Map(filesInput);
+  const canonical = [
+    `${strategy}\0${rootRevision}\n`,
+    ...[...files.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name, revision]) => `${name}\0${revision}\n`),
+  ].join("");
+  return { files, rootRevision, revision: hash(canonical), strategy };
 }
 
 function isWithin(candidate: string, prefix: string): boolean {
@@ -127,17 +170,29 @@ export class WorkspaceSandbox {
   readonly #root: string;
   readonly #rootIdentity: string;
   readonly #deniedPrefixes: readonly string[];
+  readonly #snapshotIgnoredPrefixes: readonly string[];
+  readonly #consistencyMode: WorkspaceConsistencyMode;
   readonly #maxFileBytes: number;
+  readonly #sessionExpected = new Map<
+    string,
+    { readonly kind: "content" | "metadata"; readonly revision: string }
+  >();
+  #acceptedWorkspaceSnapshot: WorkspaceSnapshot | null = null;
+  #gitStatusAvailable: boolean | null = null;
 
   private constructor(
     root: string,
     rootIdentity: string,
     deniedPrefixes: readonly string[],
+    snapshotIgnoredPrefixes: readonly string[],
+    consistencyMode: WorkspaceConsistencyMode,
     maxFileBytes: number,
   ) {
     this.#root = root;
     this.#rootIdentity = rootIdentity;
     this.#deniedPrefixes = deniedPrefixes;
+    this.#snapshotIgnoredPrefixes = snapshotIgnoredPrefixes;
+    this.#consistencyMode = consistencyMode;
     this.#maxFileBytes = maxFileBytes;
   }
 
@@ -155,7 +210,19 @@ export class WorkspaceSandbox {
     const denied = (options.deniedPrefixes ?? [".evaluator", ".oracle", "hidden-tests"])
       .map((value) => normalizeWorkspacePath(value))
       .sort();
-    const sandbox = new WorkspaceSandbox(resolved, identity(rootStat), denied, maxFileBytes);
+    const snapshotIgnored = (
+      options.snapshotIgnoredPrefixes ?? DEFAULT_WORKSPACE_SNAPSHOT_IGNORED_PREFIXES
+    )
+      .map((value) => normalizeWorkspacePath(value))
+      .sort();
+    const sandbox = new WorkspaceSandbox(
+      resolved,
+      identity(rootStat),
+      denied,
+      snapshotIgnored,
+      options.consistencyMode ?? "session",
+      maxFileBytes,
+    );
     // 创建时立即验证目录句柄与 /proc/self/fd 原语可用；失败时不授予 capability。
     const rootHandle = await sandbox.#openRoot();
     await rootHandle.close();
@@ -170,6 +237,14 @@ export class WorkspaceSandbox {
     return [...this.#deniedPrefixes];
   }
 
+  get snapshotIgnoredPrefixes(): readonly string[] {
+    return [...this.#snapshotIgnoredPrefixes];
+  }
+
+  get consistencyMode(): WorkspaceConsistencyMode {
+    return this.#consistencyMode;
+  }
+
   /**
    * 仅供 ProcessSandbox 继承到 bwrap 的受信根目录句柄；调用方负责 close。
    * 公开值中不包含宿主路径，具体 ToolHandler 也拿不到该 capability。
@@ -182,6 +257,78 @@ export class WorkspaceSandbox {
     return (await this.snapshot()).revision;
   }
 
+  async captureBaseline(): Promise<WorkspaceSnapshot> {
+    const snapshot = await this.snapshot();
+    this.#acceptedWorkspaceSnapshot = snapshot;
+    return snapshot;
+  }
+
+  async acceptAgentChanges(
+    snapshot: WorkspaceSnapshot,
+    changedPaths: readonly string[],
+  ): Promise<WorkspaceSnapshot> {
+    const accepted = this.#acceptWorkspaceChanges(snapshot, changedPaths);
+    for (const relative of changedPaths) {
+      if (relative === ".") continue;
+      this.#sessionExpected.set(relative, {
+        kind: "metadata",
+        revision: await this.#pathMetadataRevision(relative),
+      });
+    }
+    return accepted;
+  }
+
+  async checkConsistency(
+    requestedScope?: "session" | "workspace",
+  ): Promise<WorkspaceConsistencyReport> {
+    const scope = requestedScope ?? (this.#consistencyMode === "session" ? "session" : "workspace");
+    if (scope === "workspace") {
+      const current = await this.snapshot();
+      const before = this.#acceptedWorkspaceSnapshot;
+      const changedPaths = before ? this.diff(before, current) : [];
+      this.#acceptedWorkspaceSnapshot = current;
+      for (const relative of changedPaths) {
+        if (relative === ".") continue;
+        this.#sessionExpected.set(relative, {
+          kind: "metadata",
+          revision: await this.#pathMetadataRevision(relative),
+        });
+      }
+      return {
+        mode: this.#consistencyMode,
+        scope,
+        status: changedPaths.length > 0 ? "drift_detected" : "clean",
+        checkedPaths: new Set([...(before?.files.keys() ?? []), ...current.files.keys()]).size,
+        changedPaths,
+        revision: current.revision,
+        revisionStrategy: current.strategy,
+      };
+    }
+
+    const changedPaths: string[] = [];
+    for (const [relative, expected] of this.#sessionExpected) {
+      const current =
+        expected.kind === "content"
+          ? await this.#pathContentRevision(relative)
+          : await this.#pathMetadataRevision(relative);
+      if (current !== expected.revision) changedPaths.push(relative);
+      this.#sessionExpected.set(relative, { ...expected, revision: current });
+    }
+    const canonical = [...this.#sessionExpected.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([relative, expected]) => `${relative}\0${expected.kind}\0${expected.revision}\n`)
+      .join("");
+    return {
+      mode: this.#consistencyMode,
+      scope,
+      status: changedPaths.length > 0 ? "drift_detected" : "clean",
+      checkedPaths: this.#sessionExpected.size,
+      changedPaths: changedPaths.sort(),
+      revision: hash(`session-overlay-v1\n${canonical}`),
+      revisionStrategy: "session_overlay_v1",
+    };
+  }
+
   async read(relativePath: string, maxBytes = this.#maxFileBytes): Promise<WorkspaceFile> {
     const normalized = this.#normalize(relativePath);
     const limit = Math.min(maxBytes, this.#maxFileBytes);
@@ -190,7 +337,9 @@ export class WorkspaceSandbox {
     }
     const capability = await this.#openParent(normalized);
     try {
-      return await this.#readAt(capability.parent, capability.name, normalized, limit);
+      const file = await this.#readAt(capability.parent, capability.name, normalized, limit);
+      this.#sessionExpected.set(normalized, { kind: "content", revision: file.revision });
+      return file;
     } finally {
       await capability.parent.close();
     }
@@ -263,7 +412,9 @@ export class WorkspaceSandbox {
       published = true;
       await unlink(temporary);
       const fileRevision = hash(bytes);
-      const workspaceRevision = await this.revision();
+      this.#sessionExpected.set(normalized, { kind: "content", revision: fileRevision });
+      const snapshot = await this.snapshot();
+      const workspaceRevision = this.#acceptWorkspaceChanges(snapshot, [normalized]).revision;
       return {
         path: normalized,
         oldRevision: null,
@@ -288,24 +439,218 @@ export class WorkspaceSandbox {
   }
 
   async snapshot(): Promise<WorkspaceSnapshot> {
+    const gitSnapshot = await this.#gitSnapshot();
+    if (gitSnapshot) return gitSnapshot;
     const root = await this.#openRoot();
     try {
       const files = new Map<string, string>();
       await this.#walk(root, ".", files);
-      const canonical = [...files.entries()]
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([name, revision]) => `${name}\0${revision}\n`)
-        .join("");
-      return { files, revision: hash(canonical) };
+      return workspaceSnapshot(
+        "sparse_metadata_v1",
+        hash(`sparse-metadata-v1\0${this.#rootIdentity}`),
+        files,
+      );
     } finally {
       await root.close();
     }
   }
 
+  async #gitSnapshot(): Promise<WorkspaceSnapshot | null> {
+    if (this.#gitStatusAvailable === false) return null;
+    const status = await this.#gitStatus().catch(() => null);
+    if (!status) {
+      this.#gitStatusAvailable = false;
+      return null;
+    }
+    this.#gitStatusAvailable = true;
+    const tokens = status.toString("utf8").split("\0");
+    const headers: string[] = [];
+    const candidates = new Map<string, string>();
+    for (let index = 0; index < tokens.length; index += 1) {
+      const record = tokens[index]!;
+      if (!record) continue;
+      if (record.startsWith("# ")) {
+        headers.push(record);
+        continue;
+      }
+      const kind = record[0];
+      const fieldCount = kind === "1" ? 8 : kind === "2" ? 9 : kind === "u" ? 10 : 1;
+      const relative = this.#gitRecordPath(record, fieldCount);
+      if (!relative) return null;
+      const original = kind === "2" ? tokens[(index += 1)] : undefined;
+      let normalized: string;
+      try {
+        normalized = normalizeWorkspacePath(relative);
+      } catch {
+        return null;
+      }
+      const ignored = [...this.#deniedPrefixes, ...this.#snapshotIgnoredPrefixes].some((prefix) =>
+        isWithin(normalized, prefix),
+      );
+      if (ignored) continue;
+      const recordRevision = hash(original ? `${record}\0${original}` : record);
+      candidates.set(normalized, recordRevision);
+      if (original) {
+        try {
+          const normalizedOriginal = normalizeWorkspacePath(original);
+          if (
+            ![...this.#deniedPrefixes, ...this.#snapshotIgnoredPrefixes].some((prefix) =>
+              isWithin(normalizedOriginal, prefix),
+            )
+          ) {
+            candidates.set(normalizedOriginal, recordRevision);
+          }
+        } catch {
+          return null;
+        }
+      }
+    }
+    const files = new Map<string, string>();
+    for (const [relative, recordRevision] of [...candidates].sort(([left], [right]) =>
+      left.localeCompare(right),
+    )) {
+      files.set(relative, hash(`${recordRevision}\0${await this.#pathMetadataRevision(relative)}`));
+    }
+    return workspaceSnapshot("git_status_v1", hash(headers.join("\0")), files);
+  }
+
+  #gitRecordPath(record: string, fieldCount: number): string | null {
+    let cursor = 0;
+    for (let field = 0; field < fieldCount; field += 1) {
+      cursor = record.indexOf(" ", cursor);
+      if (cursor < 0) return null;
+      cursor += 1;
+    }
+    return record.slice(cursor);
+  }
+
+  async #gitStatus(): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const child = spawn(
+        "/usr/bin/git",
+        [
+          "--no-optional-locks",
+          "-c",
+          "core.fsmonitor=false",
+          "-c",
+          "core.hooksPath=/dev/null",
+          "-c",
+          "status.relativePaths=true",
+          "-C",
+          this.#root,
+          "status",
+          "--porcelain=v2",
+          "--branch",
+          "-z",
+          "--untracked-files=all",
+          "--ignored=no",
+          "--",
+          ".",
+        ],
+        {
+          stdio: ["ignore", "pipe", "pipe"],
+          env: {
+            PATH: "/usr/bin:/bin",
+            HOME: "/nonexistent",
+            GIT_CONFIG_NOSYSTEM: "1",
+            GIT_CONFIG_GLOBAL: "/dev/null",
+            GIT_OPTIONAL_LOCKS: "0",
+          },
+        },
+      );
+      const chunks: Buffer[] = [];
+      let bytes = 0;
+      const timeout = setTimeout(() => child.kill("SIGKILL"), 5_000);
+      timeout.unref?.();
+      child.stdout.on("data", (chunk: Buffer) => {
+        bytes += chunk.byteLength;
+        if (bytes <= 16 * 1024 * 1024) chunks.push(chunk);
+        else child.kill("SIGKILL");
+      });
+      child.once("error", (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+      child.once("close", (code) => {
+        clearTimeout(timeout);
+        if (code === 0 && bytes <= 16 * 1024 * 1024) resolve(Buffer.concat(chunks));
+        else reject(new Error("git status unavailable"));
+      });
+    });
+  }
+
+  async #pathMetadataRevision(relative: string): Promise<string> {
+    const capability = await this.#openParent(relative).catch(() => null);
+    if (!capability) return hash("missing");
+    try {
+      const metadata = await lstat(handlePath(capability.parent, capability.name), {
+        bigint: true,
+      });
+      if (metadata.isSymbolicLink()) return hash("symlink");
+      return hash(
+        [
+          identity(metadata),
+          String(metadata.mode),
+          String(metadata.size),
+          String(metadata.mtimeNs),
+          String(metadata.ctimeNs),
+        ].join(":"),
+      );
+    } catch {
+      return hash("missing");
+    } finally {
+      await capability.parent.close();
+    }
+  }
+
+  async #pathContentRevision(relative: string): Promise<string> {
+    const capability = await this.#openParent(relative).catch(() => null);
+    if (!capability) return hash("missing");
+    try {
+      const file = await this.#readAt(
+        capability.parent,
+        capability.name,
+        relative,
+        this.#maxFileBytes,
+      );
+      return file.revision;
+    } catch {
+      return this.#pathMetadataRevision(relative);
+    } finally {
+      await capability.parent.close();
+    }
+  }
+
   diff(before: WorkspaceSnapshot, after: WorkspaceSnapshot): readonly string[] {
-    return [...new Set([...before.files.keys(), ...after.files.keys()])]
+    const changedPaths = [...new Set([...before.files.keys(), ...after.files.keys()])]
       .filter((name) => before.files.get(name) !== after.files.get(name))
       .sort();
+    return before.rootRevision !== after.rootRevision ? [".", ...changedPaths] : changedPaths;
+  }
+
+  #acceptWorkspaceChanges(
+    observed: WorkspaceSnapshot,
+    changedPaths: readonly string[],
+  ): WorkspaceSnapshot {
+    const baseline = this.#acceptedWorkspaceSnapshot;
+    if (!baseline || baseline.strategy !== observed.strategy) {
+      this.#acceptedWorkspaceSnapshot = observed;
+      return observed;
+    }
+    const files = new Map(baseline.files);
+    for (const relative of changedPaths) {
+      if (relative === ".") continue;
+      const revision = observed.files.get(relative);
+      if (revision === undefined) files.delete(relative);
+      else files.set(relative, revision);
+    }
+    const accepted = workspaceSnapshot(
+      observed.strategy,
+      changedPaths.includes(".") ? observed.rootRevision : baseline.rootRevision,
+      files,
+    );
+    this.#acceptedWorkspaceSnapshot = accepted;
+    return accepted;
   }
 
   async #atomicReplace(
@@ -352,7 +697,9 @@ export class WorkspaceSandbox {
           artifactRefs: [],
         });
       }
-      const workspaceRevision = await this.revision();
+      this.#sessionExpected.set(normalized, { kind: "content", revision: next.revision });
+      const snapshot = await this.snapshot();
+      const workspaceRevision = this.#acceptWorkspaceChanges(snapshot, [normalized]).revision;
       return {
         path: normalized,
         oldRevision: current.revision,
@@ -494,21 +841,32 @@ export class WorkspaceSandbox {
       const relative =
         relativeDirectory === "." ? entry.name : `${relativeDirectory}/${entry.name}`;
       if (this.#deniedPrefixes.some((prefix) => isWithin(relative, prefix))) continue;
+      if (this.#snapshotIgnoredPrefixes.some((prefix) => isWithin(relative, prefix))) continue;
       let child: FileHandle | undefined;
       try {
-        // lstat 只用于识别并跳过 symlink；后续 open 仍带 O_NOFOLLOW，竞态替换会 fail closed。
-        const metadata = await lstat(handlePath(directory, entry.name));
+        // revision 只记录不可伪造的 inode/ctime/mtime/size 元数据；单文件 read/edit
+        // 仍使用内容 SHA-256。这样恢复快照不再为每次工具调用读取全部文件内容。
+        const metadata = await lstat(handlePath(directory, entry.name), { bigint: true });
         if (metadata.isSymbolicLink()) continue;
-        child = await open(
-          handlePath(directory, entry.name),
-          constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW,
-        );
-        const before = await child.stat();
-        if (before.isDirectory()) {
+        if (metadata.isDirectory()) {
+          child = await open(
+            handlePath(directory, entry.name),
+            constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+          );
           await this.#walk(child, relative, output);
-        } else if (before.isFile()) {
-          const revision = await this.#hashFile(child, before, relative);
-          output.set(relative, revision);
+        } else if (metadata.isFile()) {
+          output.set(
+            relative,
+            hash(
+              [
+                identity(metadata),
+                String(metadata.mode),
+                String(metadata.size),
+                String(metadata.mtimeNs),
+                String(metadata.ctimeNs),
+              ].join(":"),
+            ),
+          );
         }
       } catch (error) {
         throw mapIoError(error, relative);
@@ -516,31 +874,6 @@ export class WorkspaceSandbox {
         await child?.close();
       }
     }
-  }
-
-  async #hashFile(
-    handle: FileHandle,
-    before: Awaited<ReturnType<FileHandle["stat"]>>,
-    relative: string,
-  ): Promise<string> {
-    const digest = createHash("sha256");
-    const chunk = Buffer.alloc(64 * 1024);
-    let position = 0;
-    while (true) {
-      const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, position);
-      if (bytesRead === 0) break;
-      digest.update(chunk.subarray(0, bytesRead));
-      position += bytesRead;
-    }
-    const after = await handle.stat();
-    if (
-      identity(before) !== identity(after) ||
-      before.size !== after.size ||
-      before.mtimeMs !== after.mtimeMs
-    ) {
-      throw new WorkspaceSandboxError("file_changed", `${relative} 在快照期间发生变化`);
-    }
-    return digest.digest("hex");
   }
 
   #confirmed(normalized: string, workspaceRevision: string | null): ToolEffects {

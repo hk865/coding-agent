@@ -7,6 +7,7 @@
 - [M2–M4 Runtime、工具、Storage 与恢复](m2-m4-verification.md)
 - [M5 App、Provider、CLI 与扩展边界](m5-verification.md)
 - [M6 验收、canary 与剩余门禁](m6-verification.md)
+- [Web UI、长会话故障与真实业务测试说明](web-ui-business-verification.md)
 
 常用命令：
 

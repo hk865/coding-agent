@@ -19,14 +19,21 @@ import type { ToolDefinition, ToolHandler } from "../../schemas/tool-schemas.js"
 const replaceInputSchema = z
   .object({
     mode: z.literal("replace"),
-    path: z.string().min(1),
-    oldText: z.string().min(1),
-    newText: z.string(),
-    expectedRevision: z.string().regex(/^[a-f0-9]{64}$/),
+    path: z.string().min(1).describe("Workspace-relative file path; never absolute"),
+    oldText: z.string().min(1).describe("Unique existing text to replace exactly once"),
+    newText: z.string().describe("Replacement text"),
+    expectedRevision: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .describe("Revision returned by the latest read of this file"),
   })
   .strict();
 const createInputSchema = z
-  .object({ mode: z.literal("create"), path: z.string().min(1), newText: z.string() })
+  .object({
+    mode: z.literal("create"),
+    path: z.string().min(1).describe("Workspace-relative new file path; never absolute"),
+    newText: z.string().describe("Complete initial file content"),
+  })
   .strict();
 export const editToolInputSchema = z.discriminatedUnion("mode", [
   replaceInputSchema,
@@ -140,7 +147,8 @@ export class EditToolHandler implements ToolHandler {
 export function createEditToolDefinition(workspace: WorkspaceSandbox): ToolDefinition {
   return {
     name: "edit",
-    description: "原子创建文件，或按唯一文本和 expectedRevision 替换现有文件",
+    description:
+      "Create a file or atomically replace one unique text occurrence. Read the file first and pass its workspace-relative path and latest revision. Use this instead of shell redirection; each edit requires permission.",
     inputSchema: editToolInputSchema,
     handler: new EditToolHandler(workspace),
     effectClass: "workspace_write",

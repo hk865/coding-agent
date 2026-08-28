@@ -2,6 +2,7 @@
 import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
 
@@ -32,6 +33,10 @@ export const appConfigSchema = z
       })
       .strict(),
     tools: z.object({ enabledNames: uniqueNames("工具名称不能重复") }).strict(),
+    workspace: z
+      .object({ consistencyMode: z.enum(["session", "workspace", "strict"]) })
+      .strict()
+      .default({ consistencyMode: "session" }),
     storage: z.object({ databasePath: z.string().trim().min(1) }).strict(),
     skills: z
       .object({
@@ -44,6 +49,14 @@ export const appConfigSchema = z
   .strict();
 
 export type AppConfig = z.infer<typeof appConfigSchema>;
+/** 当前内置模型路由的默认最大上下文窗口；配置文件仍可按模型覆盖。 */
+export const DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS = 1_000_000;
+export const DEFAULT_MAX_MODEL_REQUESTS = 64;
+export const DEFAULT_MAX_TOOL_CALLS = 128;
+export const DEFAULT_MAX_OUTPUT_TOKENS = 8_192;
+export const BUILTIN_SKILL_ROOT = fileURLToPath(
+  new URL("../../../resources/skills", import.meta.url),
+);
 export interface AppConfigOverrides {
   readonly provider?: string;
   readonly model?: string;
@@ -51,21 +64,29 @@ export interface AppConfigOverrides {
   readonly databasePath?: string;
 }
 
-function defaults(cwd: string): AppConfig {
+function defaults(): AppConfig {
   return appConfigSchema.parse({
     schemaVersion: 1,
     model: {
       provider: "deepseek",
       model: "deepseek-v4-flash",
       options: {},
-      maxOutputTokens: 1024,
+      maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
     },
-    runtime: { tokenBudget: 32_000, maxModelRequests: 12, maxToolCalls: 24 },
-    tools: { enabledNames: ["read", "edit", "shell"] },
+    runtime: {
+      tokenBudget: DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
+      maxModelRequests: DEFAULT_MAX_MODEL_REQUESTS,
+      maxToolCalls: DEFAULT_MAX_TOOL_CALLS,
+    },
+    tools: { enabledNames: ["read", "check", "edit", "shell"] },
+    workspace: { consistencyMode: "session" },
     storage: {
       databasePath: path.join(os.homedir(), ".local", "share", "coding-agent", "sessions.sqlite"),
     },
-    skills: { resourceRoot: path.join(cwd, "resources", "skills"), enabledIds: [] },
+    skills: {
+      resourceRoot: BUILTIN_SKILL_ROOT,
+      enabledIds: ["coding-safety", "project-conventions"],
+    },
     memory: { provider: "empty" },
   });
 }
@@ -79,6 +100,7 @@ function merge(base: AppConfig, overlay: unknown): AppConfig {
     model: { ...base.model, ...(value["model"] as object | undefined) },
     runtime: { ...base.runtime, ...(value["runtime"] as object | undefined) },
     tools: { ...base.tools, ...(value["tools"] as object | undefined) },
+    workspace: { ...base.workspace, ...(value["workspace"] as object | undefined) },
     storage: { ...base.storage, ...(value["storage"] as object | undefined) },
     skills: { ...base.skills, ...(value["skills"] as object | undefined) },
     memory: { ...base.memory, ...(value["memory"] as object | undefined) },
@@ -92,9 +114,9 @@ export async function loadAppConfig(input: {
   readonly overrides?: AppConfigOverrides;
 }): Promise<AppConfig> {
   const cwd = path.resolve(input.overrides?.cwd ?? input.cwd);
-  let config = defaults(cwd);
+  let config = defaults();
   if (input.configPath) {
-    const text = await readFile(path.resolve(input.configPath), "utf8");
+    const text = await readFile(path.resolve(cwd, input.configPath), "utf8");
     config = merge(config, JSON.parse(text) as unknown);
   }
   const environment = input.environment ?? process.env;
@@ -109,6 +131,11 @@ export async function loadAppConfig(input: {
   }
   if (environment["CODING_AGENT_DATABASE_PATH"]) {
     envOverlay["storage"] = { databasePath: environment["CODING_AGENT_DATABASE_PATH"] };
+  }
+  if (environment["CODING_AGENT_WORKSPACE_CONSISTENCY"]) {
+    envOverlay["workspace"] = {
+      consistencyMode: environment["CODING_AGENT_WORKSPACE_CONSISTENCY"],
+    };
   }
   config = merge(config, envOverlay);
   return merge(config, {

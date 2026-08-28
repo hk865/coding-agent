@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { HookExecutor } from "../../src/core/hooks/executor/hook-executor.js";
+import type { TokenEstimateInput } from "../../src/core/context/selection_policy/context-selection-policy.js";
 import type { BeforeModelHookPort } from "../../src/core/hooks/protocol/hook-protocol.js";
 import { HookRegistry } from "../../src/core/hooks/registry/hook-registry.js";
 import type { EventSinkPort } from "../../src/core/ports/event_sink/event-sink-port.js";
@@ -232,6 +233,88 @@ describe("M2 Runtime resilience matrix", () => {
     expect(
       state.transcript.filter((entry) => entry.kind === "tool_result").map((entry) => entry.callId),
     ).toEqual(["call-a", "call-b"]);
+  });
+
+  it("真实长会话形态连续裁剪多个工具交换后仍能完成下一轮模型请求", async () => {
+    const requests: ModelRequest[] = [];
+    const plans = [
+      [{ callId: "call-a", path: "README.md" }],
+      [{ callId: "call-b", path: "src/app/composition/app-config.ts" }],
+      [
+        { callId: "call-c1", path: "src/core/runtime/loop/runtime-runner.ts" },
+        { callId: "call-c2", path: "src/core/context/builder/context-builder.ts" },
+      ],
+    ] as const;
+    const model: ModelClientPort = {
+      stream(request): AsyncIterable<ModelEvent> {
+        requests.push(structuredClone(request));
+        const plan = plans[requests.length - 1];
+        if (!plan) {
+          return (async function* () {
+            yield* finalEvents(request.requestId);
+          })();
+        }
+        return (async function* () {
+          let sequence = 0;
+          for (const [ordinal, call] of plan.entries()) {
+            yield {
+              schemaVersion: 1,
+              requestId: request.requestId,
+              sequence: (sequence += 1),
+              type: "tool_call_started",
+              callId: call.callId,
+              name: "read",
+              ordinal,
+            };
+            yield {
+              schemaVersion: 1,
+              requestId: request.requestId,
+              sequence: (sequence += 1),
+              type: "tool_arguments_delta",
+              callId: call.callId,
+              delta: JSON.stringify({ path: call.path }),
+            };
+          }
+          yield {
+            schemaVersion: 1,
+            requestId: request.requestId,
+            sequence: sequence + 1,
+            type: "completed",
+            reason: "tool_calls",
+          };
+        })();
+      },
+    };
+    const collector = new EventCollector();
+    const state = await new RuntimeRunner({
+      modelClient: model,
+      toolExecutor: {
+        async execute(call) {
+          return success(call.callId, `读取 ${String(call.arguments["path"])} 完成`);
+        },
+      },
+      tokenEstimator: {
+        estimate(value: Readonly<TokenEstimateInput>) {
+          return "tokenBudget" in value ? value.transcript.length * 10 : value.messages.length * 10;
+        },
+      },
+      eventSinks: [collector],
+    }).run({ ...input("multi-prune-business-regression"), tokenBudget: 40 });
+
+    expect(state.status).toBe("completed");
+    expect(requests).toHaveLength(4);
+    expect(requests[3]?.messages.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+      "tool",
+    ]);
+    expect(
+      requests[3]?.messages
+        .filter((message) => message.role === "tool")
+        .map((message) => message.callId),
+    ).toEqual(["call-c1", "call-c2"]);
+    expect(collector.eventsOfType("run.failed")).toHaveLength(0);
   });
 
   it("达到 model request 上限后不启动下一次模型调用", async () => {

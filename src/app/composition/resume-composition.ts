@@ -2,6 +2,7 @@
 import path from "node:path";
 
 import type { ApprovalRequester } from "../../policy/approval/approval-coordinator.js";
+import type { EventSinkPort } from "../../core/ports/event_sink/event-sink-port.js";
 import {
   ApprovalCoordinator,
   StaticApprovalRequester,
@@ -25,12 +26,17 @@ import { FileSkillLoader } from "../../skills/loader/file-skill-loader.js";
 import { SqliteStores } from "../../storage/adapters/sqlite/sqlite-stores.js";
 import { SessionEventSink } from "../../storage/session_event_sink/session-event-sink.js";
 import { createEditToolDefinition } from "../../tools/builtin/edit/edit-tool.js";
+import { createCheckToolDefinition } from "../../tools/builtin/check/check-tool.js";
 import { createReadToolDefinition } from "../../tools/builtin/read/read-tool.js";
 import { createShellToolDefinition } from "../../tools/builtin/shell/shell-tool.js";
 import { ToolDispatcher } from "../../tools/dispatcher/tool-dispatcher.js";
 import { RegistryToolBatchPolicy, ToolRegistry } from "../../tools/registry/tool-registry.js";
 import type { AppConfig } from "./app-config.js";
-import type { SecretSource } from "./composition-root.js";
+import type { AppRuntimeConfiguration, SecretSource } from "./composition-root.js";
+import {
+  CODING_AGENT_SYSTEM_PROMPT,
+  CODING_AGENT_SYSTEM_PROMPT_VERSION,
+} from "../prompts/coding-agent-system-prompt.js";
 
 export interface ResumeAppInput {
   readonly config: AppConfig;
@@ -40,7 +46,13 @@ export interface ResumeAppInput {
   readonly approvalRequester?: ApprovalRequester;
   readonly providerRegistry?: ProviderRegistry;
   readonly signal?: AbortSignal;
-  readonly onTextDelta?: (delta: string) => void;
+  readonly onTextDelta?: (delta: string, requestId: string) => void;
+  readonly onReasoningDelta?: (delta: string, requestId: string) => void;
+  readonly onConfiguration?: (configuration: Readonly<AppRuntimeConfiguration>) => void;
+  /** 只读观察器；Session required sink 提交成功后才会收到事件。 */
+  readonly observerEventSinks?: readonly (EventSinkPort & {
+    readonly delivery: "best_effort";
+  })[];
 }
 
 export interface ResumeAppResult {
@@ -81,11 +93,15 @@ export async function resumeCodingAgent(input: Readonly<ResumeAppInput>): Promis
   });
 
   const workspaceRoot = path.resolve(input.workspaceRoot);
-  const workspace = await WorkspaceSandbox.create(workspaceRoot);
+  const workspace = await WorkspaceSandbox.create(workspaceRoot, {
+    consistencyMode: input.config.workspace.consistencyMode,
+  });
   const processProfile = await ProcessSandbox.probe(workspaceRoot, workspace);
+  const workspaceBaseline = await workspace.captureBaseline();
   const processSandbox = new ProcessSandbox(processProfile, workspaceRoot, workspace);
   const toolRegistry = new ToolRegistry();
   toolRegistry.register(createReadToolDefinition(workspace));
+  toolRegistry.register(createCheckToolDefinition(workspace));
   toolRegistry.register(createEditToolDefinition(workspace));
   toolRegistry.register(createShellToolDefinition(processSandbox));
   const tools = toolRegistry.freeze(input.config.tools.enabledNames);
@@ -110,7 +126,7 @@ export async function resumeCodingAgent(input: Readonly<ResumeAppInput>): Promis
   };
   const currentWorkspace = {
     identity: workspace.identity,
-    revision: await workspace.revision(),
+    revision: workspaceBaseline.revision,
     reference: "workspace:current",
   };
   const store = await SqliteStores.open(path.resolve(input.config.storage.databasePath));
@@ -142,6 +158,26 @@ export async function resumeCodingAgent(input: Readonly<ResumeAppInput>): Promis
       { schemaVersion: 1, requestedIds: input.config.skills.enabledIds },
       { signal },
     );
+    input.onConfiguration?.({
+      systemPromptVersion: CODING_AGENT_SYSTEM_PROMPT_VERSION,
+      systemPrompt: CODING_AGENT_SYSTEM_PROMPT,
+      provider: provider.id,
+      model: input.config.model.model,
+      thinking: input.config.model.options["thinking"] ?? "provider_default",
+      reasoningEffort: input.config.model.options["reasoningEffort"] ?? "provider_default",
+      tools: tools.modelToolSpecs(),
+      skills,
+      skillResourceRoot: input.config.skills.resourceRoot,
+      contextWindowTokens: input.config.runtime.tokenBudget,
+      maxOutputTokens: input.config.model.maxOutputTokens,
+      maxModelRequests: input.config.runtime.maxModelRequests,
+      maxToolCalls: input.config.runtime.maxToolCalls,
+      workspaceConsistency: {
+        mode: workspace.consistencyMode,
+        revisionStrategy: workspaceBaseline.strategy,
+        ignoredPrefixes: workspace.snapshotIgnoredPrefixes,
+      },
+    });
     const memory = new EmptyMemoryProvider();
     const memories = await memory.recall(
       {
@@ -170,22 +206,30 @@ export async function resumeCodingAgent(input: Readonly<ResumeAppInput>): Promis
       runId: recovery.state.runId,
       workspaceIdentity: workspace.identity,
       workspaceRevision: () => workspace.revision(),
+      ...(workspace.consistencyMode === "strict"
+        ? {
+            reconcileBeforeApproval: async () => {
+              const report = await workspace.checkConsistency("workspace");
+              return { changedPaths: report.changedPaths };
+            },
+          }
+        : {}),
       sandboxProfileVersion: processProfile.version,
     });
     const sessionSink = await SessionEventSink.connect(store, input.sessionId, { signal });
     const runner = new RuntimeRunner({
       modelClient,
       toolExecutor: dispatcher,
-      eventSinks: [sessionSink],
+      eventSinks: [sessionSink, ...(input.observerEventSinks ?? [])],
       limits,
       toolBatchPolicy: new RegistryToolBatchPolicy(tools),
       maxModelRetries: 0,
       ...(input.onTextDelta ? { onTextDelta: input.onTextDelta } : {}),
+      ...(input.onReasoningDelta ? { onReasoningDelta: input.onReasoningDelta } : {}),
     });
     const context = {
       run: turnRecord.payload.run,
-      baseSystemPrompt:
-        "You are a coding agent. Use only the provided tools and stay within the workspace.",
+      baseSystemPrompt: CODING_AGENT_SYSTEM_PROMPT,
       tools: tools.modelToolSpecs(),
       skills,
       memories,

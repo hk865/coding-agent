@@ -102,7 +102,8 @@ export interface RuntimeRunnerDependencies {
   readonly toolBatchPolicy?: ToolBatchPolicy;
   readonly maxModelRetries?: number;
   readonly eventSinkTimeoutMs?: number;
-  readonly onTextDelta?: (delta: string) => void;
+  readonly onTextDelta?: (delta: string, requestId: string) => void;
+  readonly onReasoningDelta?: (delta: string, requestId: string) => void;
 }
 
 class SystemClock implements RuntimeClock {
@@ -213,7 +214,8 @@ export class RuntimeRunner {
   readonly #ids: RuntimeIdGenerator;
   readonly #toolBatchPolicy: ToolBatchPolicy;
   readonly #maxModelRetries: number;
-  readonly #onTextDelta: ((delta: string) => void) | undefined;
+  readonly #onTextDelta: ((delta: string, requestId: string) => void) | undefined;
+  readonly #onReasoningDelta: ((delta: string, requestId: string) => void) | undefined;
   #busy = false;
 
   constructor(dependencies: RuntimeRunnerDependencies) {
@@ -236,6 +238,7 @@ export class RuntimeRunner {
       throw new RangeError("maxModelRetries 必须是非负安全整数");
     }
     this.#onTextDelta = dependencies.onTextDelta;
+    this.#onReasoningDelta = dependencies.onReasoningDelta;
   }
 
   async run(
@@ -471,7 +474,7 @@ export class RuntimeRunner {
         }
         if (beforeModel.kind === "modify") {
           request = beforeModel.value;
-          // Hook 可以调整提示词，但不能借此绕过调用方给定的输入预算。
+          // Hook 可以调整提示词，但不能借此绕过调用方给定的模型上下文窗口。
           const modifiedEstimate = estimateTokens(request, this.#tokenEstimator);
           if (modifiedEstimate > context.input.tokenBudget) {
             throw new ContextSelectionError(
@@ -488,7 +491,12 @@ export class RuntimeRunner {
         if (isTerminalRunStatus(state.status)) return state;
         const stream = await consumeModelStream(this.#modelClient, request, {
           signal: context.cancellation.signal,
-          ...(this.#onTextDelta ? { onTextDelta: this.#onTextDelta } : {}),
+          ...(this.#onTextDelta
+            ? { onTextDelta: (delta: string) => this.#onTextDelta?.(delta, requestId) }
+            : {}),
+          ...(this.#onReasoningDelta
+            ? { onReasoningDelta: (delta: string) => this.#onReasoningDelta?.(delta, requestId) }
+            : {}),
         });
         if ("usage" in stream && stream.usage) {
           state = await this.#commit(state, context, "model.usage_recorded", {
@@ -521,6 +529,7 @@ export class RuntimeRunner {
               messageId: this.#ids.next(),
               role: "assistant",
               content: stream.text,
+              ...(stream.reasoning ? { reasoningContent: stream.reasoning } : {}),
             },
             toolCalls: stream.toolCalls,
           });

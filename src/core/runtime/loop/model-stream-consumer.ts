@@ -24,6 +24,7 @@ export type ModelStreamResult =
       readonly kind: "completed";
       readonly reason: "final_answer" | "tool_calls";
       readonly text: string;
+      readonly reasoning: string;
       readonly toolCalls: readonly ToolCall[];
       readonly usage: ModelUsage | null;
     }
@@ -48,6 +49,7 @@ export interface ModelStreamConsumerOptions {
   readonly maxBufferedCharacters?: number;
   readonly maxEvents?: number;
   readonly onTextDelta?: (delta: string) => void;
+  readonly onReasoningDelta?: (delta: string) => void;
 }
 
 export async function consumeModelStream(
@@ -57,6 +59,7 @@ export async function consumeModelStream(
 ): Promise<ModelStreamResult> {
   const events: ModelEvent[] = [];
   let text = "";
+  let reasoning = "";
   let usage: ModelUsage | null = null;
   const calls = new Map<
     string,
@@ -108,6 +111,9 @@ export async function consumeModelStream(
       if (event.type === "text_delta") {
         text += event.delta;
         options.onTextDelta?.(event.delta);
+      } else if (event.type === "reasoning_delta") {
+        reasoning += event.delta;
+        options.onReasoningDelta?.(event.delta);
       } else if (event.type === "tool_call_started") {
         if (ordinals.has(event.ordinal)) {
           return {
@@ -129,7 +135,9 @@ export async function consumeModelStream(
       } else if (event.type === "usage_snapshot") usage = event.usage;
 
       const buffered =
-        text.length + [...calls.values()].reduce((sum, call) => sum + call.argumentsJson.length, 0);
+        text.length +
+        reasoning.length +
+        [...calls.values()].reduce((sum, call) => sum + call.argumentsJson.length, 0);
       if (buffered > maxBufferedCharacters) {
         return {
           kind: "protocol_error",
@@ -182,5 +190,5 @@ export async function consumeModelStream(
         arguments: jsonObjectSchema.parse(value),
       });
     });
-  return { kind: "completed", reason: terminal.reason, text, toolCalls, usage };
+  return { kind: "completed", reason: terminal.reason, text, reasoning, toolCalls, usage };
 }
