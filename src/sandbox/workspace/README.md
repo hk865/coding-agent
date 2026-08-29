@@ -1,9 +1,16 @@
 # Workspace Sandbox
 
-- **职责**：规范化并限制文件能力只能作用于受控 workspace。
-- **非职责**：不决定用户是否批准某次修改。
-- **允许依赖**：Linux 文件系统能力与配置。
-- **禁止依赖**：Core Runtime。
-- **负责里程碑**：M3
-- **当前状态**：已实现 workspace 内 read/write/create/delete/patch、路径限制、symlink 防护、内容级 edit 并发保护；revision 优先使用受限 Git
-  porcelain 主线，非 Git 目录回退稀疏元数据。Agent 维护 Session 路径覆盖树与一个可替换的 workspace 基线，check 支持 session/workspace 对账，strict 模式在风险操作审批前拒绝外部漂移。
+`WorkspaceSandbox`
+把所有文件能力限制在启动时打开的 workspace 根目录。它使用目录句柄和文件身份复核抵抗
+`..`、绝对路径、symlink 逃逸及检查后替换。
+
+## 能力
+
+- 有界读取文件/目录，以及 write、replace、delete、patch。
+- 编辑前内容摘要与文件身份检查，避免覆盖并发变化。
+- 记录本 Session 已观察/修改的路径覆盖树。
+- Git workspace 使用受限 porcelain 生成 revision；非 Git 目录使用稀疏元数据快照。
+- `session` / `workspace` / `strict` 三种一致性模式和显式 `checkConsistency()`。
+
+文件副作用返回 changedPaths 和 workspace
+revision，供 ToolResult、审批指纹和恢复使用。本模块不决定用户是否批准操作。

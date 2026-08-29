@@ -1,38 +1,10 @@
 # OpenAI Provider
 
-```yaml
-implementation: IMPLEMENTED
-scope: M5
-current_stage: M6_ACCEPTANCE
-updated: 2026-08-27
-```
+`OpenAIModelClient` 使用官方 SDK 的 Responses API 实现 `ModelClientPort`。
 
-## 职责与边界
+它把 `ModelRequest` 映射为 Responses input、function tool schema 和输出上限，并把流式文本、function
+call 参数、usage、completed、truncated、error 与 cancelled 归一为
+`ModelEvent`。AbortSignal 直接传到网络边界，厂商异常经共享支持模块转成稳定错误。
 
-计划使用官方 SDK 和 Responses API 实现一个 ModelClientPort Adapter。
-
-本模块负责鉴权、请求映射和厂商事件转换；不负责 Runtime 重试策略、Tool 执行、权限或状态推进。
-
-## 当前状态
-
-已实现官方 SDK Responses API
-Adapter、流式文本/ToolCall/usage/错误/取消映射；低预算 text + 不执行 ToolCall 的 acceptance 工具已就绪，真实网络结果仍待凭据授权和记录。
-
-## 已实现
-
-- 作为多 Provider 架构中的 `openai` Adapter，由 Registry/Composition 显式选择。
-- 把 ModelRequest 映射为 Responses API 输入、工具 schema 和输出上限。
-- 把文本、ToolCall 参数、usage、completed、truncated、error 和 cancelled 映射为 ModelEvent。
-- 把 AbortSignal 传递到网络边界，并对厂商错误进行稳定分类。
-- 使用本地 fixture 验证协议，真实网络仅作受控人工确认。
-
-## 前置条件
-
-- 通过配置和环境安全注入 API 凭据。
-- 明确 MVP 基线模型，但不把模型名硬编码进 Core。
-
-## 验收条件
-
-- 通过 ModelClientPort 共享 contract 和模型流集成测试。
-- 流式 ToolCall 参数顺序、usage 和终止事件与协议一致。
-- 取消能及时结束请求，日志不泄漏 Authorization 或响应敏感字段。
+Provider ID 为 `openai`，秘密名由 Registry 声明为
+`OPENAI_API_KEY`。本模块不决定 Runtime 重试、工具权限或 Run 终态，也不会把 SDK 类型暴露给 Core。

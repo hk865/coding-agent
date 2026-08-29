@@ -1,11 +1,12 @@
 # Data Flow
 
-与当前实现同步的调用链、事件流和状态转换：
+本目录从时序角度补充模块地图：
 
-- [M1 契约和测试替身允许的数据方向](m1-contract-flow.md)
-- [M2–M4 Runtime、工具、Session 与恢复](m2-m4-runtime-flow.md)
-- [M5 CLI、Provider 与工具闭环](m5-cli-provider-flow.md)
-- [下一阶段 Agent 数据流：Inbox、提交、投影、压缩与多 Agent](next-agent-data-flow.md)
+- [Core 契约流](m1-contract-flow.md)：State/Event、Model、Tool、Context 与 Fake 的数据方向。
+- [Runtime、工具、Session 与恢复](m2-m4-runtime-flow.md)：事件提交、Reducer、Checkpoint 和重放。
+- [CLI、Provider 与工具闭环](m5-cli-provider-flow.md)：App Composition 到真实 Adapter。
+- [下一阶段 Agent 数据流](next-agent-data-flow.md)：Inbox、投影、压缩和多 Agent 提案。
 
-模块依赖图见 [M1–M6 实际模块地图](../architecture/module-map.md)，目录职责见
-[M1–M6 实际目录结构](../architecture/folder-structure.md)。
+主链不变量是：外部结果先归一为 AgentEvent，required
+sink 提交成功后 Reducer 才推进 State；恢复以 append-only Session 为事实源。静态依赖关系见
+[模块地图](../architecture/module-map.md)。

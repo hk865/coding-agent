@@ -1,9 +1,11 @@
 # Runtime State
 
-- **职责**：拥有 Run、Turn、RunState、RunStatus、Outcome、Pause、strict
-  schema、初始工厂、状态不变量和阶段派生。
-- **非职责**：不执行完整 Reducer、Loop 或外部副作用。
-- **允许依赖**：Core context 值类型和 ToolExecutorPort 值类型。
-- **禁止依赖**：Adapter、IO、AbortSignal、厂商 SDK。
-- **负责里程碑**：M1-01；Reducer 在 M2 实现。
-- **当前状态**：`△ CONTRACT`，contract test 已覆盖初始快照、JSON、非法组合和派生阶段。
+`run-state.ts` 定义
+`Run`、`Turn`、`RunState`、transcript、ToolBatch、usage、状态与终态结构，并为所有值提供 strict
+schema。
+
+`createInitialRunState()` 生成空运行快照，`deriveRunPhase()` 根据事实派生当前阶段，
+`validateRunStateInvariants()` 检查 sequence、活动 Turn、未结算 ToolCall、终态与 outcome 的组合。
+
+State 是可序列化快照，不包含 AbortSignal、Provider
+SDK、数据库连接或执行逻辑。状态变化只能通过 Reducer 应用 AgentEvent。

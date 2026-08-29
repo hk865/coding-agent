@@ -1,8 +1,10 @@
-# Permission Policy
+# Permission
 
-- **职责**：根据工具、参数和 workspace 策略计算权限结论。
-- **非职责**：不依赖模型自行保证安全。
-- **允许依赖**：工具声明、调用参数、配置。
-- **禁止依赖**：Core Runtime。
-- **负责里程碑**：M3
-- **当前状态**：M3 已实现路径规范化、敏感资源拒绝和 read/edit/shell 的 allow/deny/ask 决策，并通过工具链集成测试。
+`DefaultPermissionPolicy` 对 `ToolOperation` 做路径/cwd 规范化和策略计算，返回带摘要的
+`allow`、`deny` 或 `ask`。
+
+读取类操作可按配置直接允许；workspace 写入和进程操作通常要求审批；绝对路径、逃逸、受保护路径和不合法资源直接拒绝。`normalizeWorkspacePath()`
+提供统一的相对路径语义。
+
+Policy 不信任模型自行保证安全，也不访问 RunState 或执行工具。需要人工确认的决策交给
+`ApprovalCoordinator`，真正隔离由 Sandbox 强制。

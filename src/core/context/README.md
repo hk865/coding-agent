@@ -1,9 +1,21 @@
 # Context
 
-- **职责**：把受控信息组装成厂商无关 ModelRequest。
-- **非职责**：不执行工具、保存 Session 或直接调用模型。
-- **允许依赖**：Core 值类型与 Provider Port。
-- **禁止依赖**：外层 Adapter 实现。
-- **负责里程碑**：M1–M2
-- **当前状态**：截至 M4，Context 值类型、确定性 Builder 和 token
-  SelectionPolicy 已实现并通过单元/集成测试；Compactor 延期到 MVP 后。
+Context 子系统把系统提示、对话、工具定义、Skill、Memory 和补充片段转换为预算内的
+`ModelRequest`。它只处理已经取得的值，不读取文件、不访问存储，也不调用 Provider。
+
+## 流程
+
+```text
+ContextFragment / SkillContext / MemoryItem / transcript
+                  │
+          ContextSelectionPolicy
+                  │
+       DeterministicContextBuilder
+                  │
+             ModelRequest
+```
+
+- `types/` 定义可 JSON round-trip 的共享值与 strict schema。
+- `selection_policy/` 估算 token，并以稳定顺序保留或裁剪上下文。
+- `builder/` 校验 transcript 关联，排序工具与片段，组装最终请求。
+- `compactor/` 是摘要式压缩的预留边界，当前主链路不调用。

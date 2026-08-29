@@ -1,3 +1,8 @@
-# ToolBatchPolicy Port
+# Tool Batch Policy Port
 
-定义 Runtime 的工具批次调度边界。Core 默认串行；外层工具注册表只有在确认全部调用均为可信、独立、只读工具时，才能返回并行组。
+`ToolBatchPolicy` 把模型一次返回的 ToolCall 划分为有序执行组。`SerialToolBatchPolicy`
+是 Core 默认值，每个调用独立串行。
+
+外层 `RegistryToolBatchPolicy` 只有在所有工具都声明为可信、独立的 read-only 工具时，才会返回
+`parallel_read_only`
+组；任何写操作、进程操作或未知工具都会保持串行。Policy 只规划 callId，不执行工具。

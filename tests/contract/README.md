@@ -1,8 +1,11 @@
 # Contract Tests
 
-- **职责**：验证 Port 的 Fake 与真实 Adapter 遵守同一契约。
-- **非职责**：不以 Fake 私有行为替代 Port 契约。
-- **允许依赖**：Core Port、schema 与验证器。
-- **禁止依赖**：无关内部实现。
-- **负责里程碑**：M1 起
-- **当前状态**：M1 State/Event、Model、Tool、Hook/EventSink 契约测试已实现。
+Contract tests 固定跨实现不变量：
+
+- State/Event schema、转换合法性与 Reducer 前置条件。
+- ModelClient 的流式事件序列、终止与取消。
+- ToolExecutor 的 callId、结果、错误与 effects。
+- Hook/EventSink 的控制和提交语义。
+- OpenAI/DeepSeek、Skill/Memory 及 Store Adapter 的共同 Port 行为。
+
+Fake 和真实 Adapter 应运行同一契约；测试不能依赖某个 Fake 的私有便利行为来定义生产语义。

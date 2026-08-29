@@ -1,9 +1,10 @@
 # Session Store Port
 
-- **职责**：定义 Session 元数据和消息历史的持久化边界。
-- **非职责**：不选择数据库或序列化格式。
-- **允许依赖**：Core 自有 Session 值类型。
-- **禁止依赖**：storage 实现细节。
-- **负责里程碑**：M4
-- **当前状态**：M4 已实现 append-only
-  Session、分页读取、revision 乐观并发和 SessionStorePort，并由内存/SQLite 适配器共享验证。
+`session-store-port.ts` 定义 append-only
+Session 的元数据、`RunConfigSnapshot`、记录格式、分页读取、revision 乐观并发与
+`SessionStorePort`。`session-projection.ts` 用同一 Reducer 把记录纯投影回 `RunState`。
+
+每条 `SessionRecord`
+具有连续 position 和稳定 eventId；重复追加相同事实可幂等返回，内容冲突则失败。恢复逻辑按页读取全部记录并验证连续性。
+
+数据库 schema、SQL 和事务实现属于 Storage Adapter。

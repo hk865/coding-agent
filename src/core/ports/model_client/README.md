@@ -1,9 +1,10 @@
 # Model Client Port
 
-- **职责**：拥有 ModelRequest、ModelMessage、ModelEvent、ModelUsage、ModelClientPort、strict
-  schema 和流协议校验。
-- **非职责**：不出现 OpenAI 等厂商类型，不决定 Run 终止状态。
-- **允许依赖**：Core context 与 ToolExecutorPort 值类型。
-- **禁止依赖**：`model/providers` 实现和网络 SDK。
-- **负责里程碑**：M1-02；真实 Provider 在 M5 实现。
-- **当前状态**：`△ CONTRACT`，final/tool/usage/error/cancel 流协议已冻结并通过 contract test。
+`model-client-port.ts` 隔离 Runtime 与模型厂商协议，拥有 `ModelRequest`、`ModelMessage`、
+`ModelToolSpec`、`ModelEvent`、usage、错误和 `ModelClientPort`。
+
+Provider 以异步流返回 text/reasoning delta、ToolCall、usage 和唯一终止事件。
+`validateModelEventSequence()` 检查 requestId、事件顺序、唯一终止、ToolCall 聚合与协议错误；
+`model-stream-consumer.ts` 再把合法流归并为一次模型结果。
+
+OpenAI/DeepSeek SDK 类型、鉴权和网络异常只存在于 `src/model`，不能泄漏到此 Port。

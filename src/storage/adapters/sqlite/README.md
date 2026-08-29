@@ -1,8 +1,10 @@
-# SQLite Store
+# SQLite Stores
 
-- **职责**：以事务方式持久化 Session 和 Checkpoint。
-- **非职责**：不拥有 Core Store 契约，也不把 SQL、事务或驱动类型泄漏到 Core。
-- **允许依赖**：Session/Checkpoint Store Port 与 SQLite 驱动。
-- **禁止依赖**：Core Runtime 内部。
-- **负责里程碑**：M4
-- **当前状态**：M4 已使用 Node 内置 SQLite 实现事务化 Session/Checkpoint 持久化，并通过共享 contract 与跨进程恢复 E2E。
+`SqliteStores` 使用 Node 内置 `node:sqlite` 同时实现 Session 与 Checkpoint Store。
+
+初始化创建版本化表和约束；追加事件在事务中检查 expected
+revision、eventId 幂等与 position 连续性，再更新 Session
+revision。Checkpoint 以 run/session 为键保存规范 JSON 和 checksum。读取通过 strict
+schema 恢复领域值。
+
+连接和事务只存在于 Adapter。`close()` 由 Composition 的资源生命周期负责，Core 不接触 SQL。

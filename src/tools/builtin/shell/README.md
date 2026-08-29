@@ -1,8 +1,8 @@
 # Shell Tool
 
-- **职责**：在 process sandbox 中执行受控命令。
-- **非职责**：不允许无 sandbox 的降级执行。
-- **允许依赖**：Tool schema、Permission、Approval、Sandbox process。
-- **禁止依赖**：Core Runtime。
-- **负责里程碑**：M3
-- **当前状态**：M3 已实现 ProcessSandbox 命令工具及退出、超时、取消和输出截断映射；无隔离能力时不会静默降级。
+`ShellToolHandler` 把 argv、cwd、环境和超时请求交给 `ProcessSandbox`，再将 exit
+code、stdout/stderr、截断与取消映射为 `ToolResult`。
+
+该工具的 effect class 为 `process`，要求隔离进程与网络 Sandbox
+capability，并通常进入人工审批。命令可能产生无法完全枚举的副作用，因此异常/取消时会保守报告
+`possible` effects。bubblewrap 不可用时返回 `sandbox_unavailable`，不降级执行。

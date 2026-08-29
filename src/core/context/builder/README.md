@@ -1,8 +1,9 @@
 # Context Builder
 
-- **职责**：从已取得的值按确定性层级组装 ModelRequest，验证 transcript 关联并稳定排序工具。
-- **非职责**：不调用 Provider、Storage、Tool、文件系统或模型；M1 不做 token 裁剪。
-- **允许依赖**：Context types、Runtime transcript 值和 ModelClientPort 类型。
-- **禁止依赖**：外层 `tools`、`model`、`storage`、`skills`、`memory`。
-- **负责里程碑**：M1-04 冻结组装边界；M2 增加 SelectionPolicy 与 Loop 集成。
-- **当前状态**：`△ CONTRACT`，确定性、不可变性、排序和关联错误已通过 unit test。
+`context-builder.ts` 提供 `buildModelRequest()` 与
+`DeterministicContextBuilder`，把已选择的上下文值确定性组装为 `ModelRequest`。
+
+Builder 会校验 ID 唯一性、transcript 中 ToolCall/ToolResult 关联和输入 schema；系统提示按固定分区加入 fragment、Skill 与 Memory，工具规格按名称排序，历史消息保持语义顺序。
+
+它不估算预算、不主动查询 Skill/Memory，也不调用模型。调用方应先通过 `ContextSelectionPolicy`
+完成裁剪，再将结果交给 Builder。

@@ -1,39 +1,15 @@
 # App
 
-```yaml
-implementation: IMPLEMENTED
-scope: M5
-current_stage: M6_ACCEPTANCE
-updated: 2026-08-27
-```
+`app`
+是可执行入口与生产装配层。它可以依赖 Core 和所有外层 Adapter，负责把配置、秘密、进程资源和用户交互转换成一次完整运行；Core 不反向依赖本目录。
 
-## 职责与边界
+## 内部结构
 
-组合 CLI、Core 与所有外层 Adapter，形成用户可启动的应用边界。
+- `cli/`：解析 `run` / `resume` 命令、终端审批、流式输出、信号与退出码。
+- `web/`：仅回环地址的 HTTP/SSE UI、单活动任务管理和事件投影。
+- `composition/`：配置合并、新会话装配、恢复装配和资源释放。
+- `prompts/`：由 Composition 注入并写入运行配置快照的版本化系统提示。
 
-App 可以依赖 Core 和 Adapter，但 Core 禁止反向依赖 App；业务状态转换仍由 Core
-Runtime 和 Reducer 决定。
-
-## 当前状态
-
-已实现 CLI、strict 配置、Composition Root、新会话与恢复会话装配，以及确定性 child-process/PTY
-smoke。
-
-## 已实现
-
-- 实现最小 CLI 输入、流式输出、审批、取消与退出码。
-- 实现 Composition
-  Root，通过 Registry 选择 OpenAI/DeepSeek，并装配 Tools、Storage、Policy、Sandbox 与 Observability。
-- 建立应用生命周期和资源清理顺序。
-
-## 前置条件
-
-- M3 工具安全链和 M4 Session/恢复契约保持稳定。
-- OpenAI/DeepSeek ModelClientPort Adapter、Provider Registry 和 M5 配置加载可用。
-
-## 验收条件
-
-- 可从命令行启动、完成一次流式 ToolCall 闭环并退出。
-- Ctrl+C 能协作式取消且不遗留子进程。
-- App 装配不要求修改 RuntimeRunner。
-- Core 架构检查继续禁止反向依赖。
+`runCodingAgent()` 和 `resumeCodingAgent()`
+是生产主入口。它们创建具体 Provider、工具安全链、SQLite、Skill/Memory 与
+`RuntimeRunner`；业务状态转换仍只发生在 Core 的 Event/Reducer 中。

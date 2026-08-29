@@ -1,9 +1,10 @@
 # Checkpoint Store Port
 
-- **职责**：定义可恢复运行快照的保存和读取边界。
-- **非职责**：不定义 SQLite schema。
-- **允许依赖**：Core RunState 快照值。
-- **禁止依赖**：storage 实现细节。
-- **负责里程碑**：M4
-- **当前状态**：M4 已实现 checkpoint
-  schema、checksum、稳定恢复模式和 CheckpointStorePort，并由内存/SQLite 适配器共享验证。
+`checkpoint-store-port.ts` 定义稳定恢复快照、候选信息、resume mode、checksum 和
+`CheckpointStorePort`。
+
+Checkpoint 包含 `RunState` 与已提交 Session cursor，只能在 Runtime 的稳定事件边界写入。
+`createCheckpoint()`
+生成规范 checksum，读取方必须先校验再使用。Session 仍是事实源；Checkpoint 是加速恢复的派生快照，不能跳过事件重放的一致性检查。
+
+SQLite schema、事务和文件路径属于 Storage Adapter，不进入本 Port。

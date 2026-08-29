@@ -1,8 +1,9 @@
 # Policy
 
-- **职责**：决定权限和审批，不直接执行副作用。
-- **非职责**：不等同于 OS sandbox。
-- **允许依赖**：工具声明、调用信息和用户策略。
-- **禁止依赖**：Core Runtime 状态。
-- **负责里程碑**：M3
-- **当前状态**：M3 已实现 PermissionPolicy 与 ApprovalCoordinator；内容级 Guardrails 保持 MVP 后延期。
+Policy 层对工具操作产生确定性安全决策，但不执行副作用，也不替代 OS Sandbox。
+
+- `permissions/`：规范化资源并输出 `allow` / `deny` / `ask`。
+- `approval/`：把 `ask` 绑定到操作指纹和 workspace revision，再请求人工确认。
+- `guardrails/`：内容级防护的预留边界。
+
+`ToolDispatcher` 是 Policy 的调用方。模型文本、Skill 或 Tool 自报元数据都不能绕过这里的硬拒绝规则。

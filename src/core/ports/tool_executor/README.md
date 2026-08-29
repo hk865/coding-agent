@@ -1,9 +1,10 @@
 # Tool Executor Port
 
-- **职责**：拥有 ToolCall、ToolResult、ToolOutputPart、ToolEffects、ToolError、ToolExecutorPort 和 callId 校验。
-- **非职责**：不实现 Registry、Dispatcher、Permission、Approval、Sandbox 或具体工具。
-- **允许依赖**：Core JSON 值类型。
-- **禁止依赖**：`tools`、`policy`、`sandbox` 具体实现。
-- **负责里程碑**：M1-03；真实 Dispatcher 与 read/edit/shell 在 M3 实现。
-- **当前状态**：`△ CONTRACT`，success/error/cancelled 和 possible side effect 语义已通过 contract
-  test。
+`tool-executor-port.ts` 拥有模型无关的 `ToolCall`、`ToolResult`、结构化 output、effects、错误分类和
+`ToolExecutorPort`。
+
+结果分为
+`success`、`error`、`cancelled`，并始终绑定原 callId。Effects 明确区分无副作用、已确认副作用和可能已发生但结果未知的副作用；恢复逻辑据此决定是否允许继续。
+`assertToolResultMatchesCall()` 防止错误关联。
+
+Registry、Permission、Approval、Sandbox 和具体 handler 都属于 `src/tools` 及其依赖，不进入本 Port。

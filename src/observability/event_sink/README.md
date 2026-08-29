@@ -1,8 +1,8 @@
-# Event Sink Adapter
+# Event Sink Adapters
 
-- **职责**：实现 EventSinkPort 并分发只读运行事件。
-- **非职责**：不修改或回写 Runtime 状态。
-- **允许依赖**：EventSinkPort。
-- **禁止依赖**：Reducer 和 Provider 实现。
-- **负责里程碑**：M2
-- **当前状态**：已保留职责化 EventSink 适配器扩展入口；当前具体 best-effort 实现位于 logging 和 trace，尚无额外通用适配器。
+`event-sink-adapters.ts` 是通用 best-effort
+Sink 的扩展入口，当前仅重新导出/承载 Adapter 边界；具体实现位于 `logging/`、`trace/`，Web 投影位于
+`src/app/web`。
+
+新增 Sink 只能读取 `AgentEvent`，并应声明
+`delivery: "best_effort"`。需要阻断提交的持久化职责属于 Storage 或 Checkpoint 模块，不放在这里。

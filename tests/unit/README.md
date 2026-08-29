@@ -1,8 +1,7 @@
 # Unit Tests
 
-- **职责**：验证纯逻辑、状态转换、局部不变量和确定性测试替身。
-- **非职责**：不伪装跨模块集成覆盖。
-- **允许依赖**：被测模块、tests/helpers 与 tests/fakes。
-- **禁止依赖**：真实网络、真实 sleep 和生产存储。
-- **负责里程碑**：随里程碑增量
-- **当前状态**：M0 helper、M1 ContextBuilder 与 Fakes 单元测试已实现。
+Unit tests 聚焦单个模块的纯逻辑与局部不变量，包括 Context
+Builder/Selection、模型流归并、配置/CLI 解析、结构化日志、Web Event
+Projection/RunManager 以及 helper/fake 自身行为。
+
+该层使用手动时钟、确定性 ID 和脚本化 Fake，不访问真实网络、生产数据库或用户 workspace。跨模块提交、恢复和 Sandbox 语义放在 integration/e2e。

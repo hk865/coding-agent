@@ -1,16 +1,19 @@
 # Architecture
 
-这里记录与当前代码版本同步的模块地图、依赖方向和目录职责：
+本目录说明“模块在哪里、允许依赖谁、运行时如何组合”。
 
-- [M1–M6 实际模块地图](module-map.md)
-- [M1–M6 实际目录结构](folder-structure.md)
-- [源码模块阅读指南](source-module-guide.md)
+## 当前实现
 
-下一阶段架构提案：
+- [模块地图](module-map.md)：App、Core、Adapter、Benchmark 的组合与静态依赖。
+- [目录结构](folder-structure.md)：源码、测试和评测目录的所有权。
+- [源码阅读指南](source-module-guide.md)：按 State/Event/Port/Loop/Adapter 的阅读顺序。
+- [安全快照与增量一致性](m4-secure-snapshot-incremental-consistency.md)：workspace 基线设计。
 
-- [Agent Core 演进总览（先读这个）](evolution-overview.md)
+## 演进提案
+
+- [Agent Core 演进总览](evolution-overview.md)
 - [Coding Agent、DSH 与 Pi 的关系](dsh-pi-relationship.md)
 - [下一阶段模块图](next-module-map.md)
 - [下一阶段数据流](../data-flow/next-agent-data-flow.md)
 
-长期产品和跨版本设计仍位于 D 盘文档中心；发生冲突时以可执行代码、通过的测试和本目录当前文档为准。
+提案不等同于已实现模块。发生冲突时，以源码、通过的测试和上面的当前实现文档为准。

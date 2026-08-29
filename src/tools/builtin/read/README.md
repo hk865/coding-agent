@@ -1,8 +1,6 @@
 # Read Tool
 
-- **职责**：在 workspace 边界内读取允许的文件。
-- **非职责**：不修改文件或执行命令。
-- **允许依赖**：Tool schema、Permission、Sandbox workspace。
-- **禁止依赖**：Core Runtime。
-- **负责里程碑**：M3
-- **当前状态**：M3 已实现受 workspace 边界和返回量限制的文件/目录读取，并通过工具安全链集成测试。
+`ReadToolHandler` 通过 `WorkspaceSandbox` 读取受控文件或目录，并把结果转换为有界的文本/JSON
+`ToolOutputPart`。路径在 schema、Permission 和 Sandbox 三层校验。
+
+该工具声明为 read-only，可在定义允许且批次中所有调用都独立只读时参与并行组。它不修改文件、不执行命令，也不能访问 workspace 根之外或受保护的资源。

@@ -1,17 +1,21 @@
 # 本机 Web UI
 
-Web UI 是 CLI 之外的本机交互入口，复用相同的 App
-Composition、Provider、SQLite、权限、审批和 sandbox。服务固定监听 `127.0.0.1`，不提供公网监听选项。
+Web
+UI 是 CLI 的同级入口，复用同一 Composition、安全链和 SQLite，不是独立 Agent 实现。服务固定监听回环地址，页面与 API 由同一 Node
+HTTP Server 提供。
 
-页面通过同源 HTTP 创建单个活动任务，通过 SSE 接收带 chunkIndex 的真实流式文本、DeepSeek
-`reasoning_content`、已提交 AgentEvent 的运行轨迹和指标；edit/shell 审批使用独立 POST 返回。API
-Key 只存在于浏览器输入框、单次 HTTPS/HTTP
-loopback 请求和当前服务进程内，不写入 Session、日志或浏览器存储。
+## 组件
 
-当前提供：新任务、异常恢复、流式回答、逐轮推理内容、允许一次/本任务允许同名工具/拒绝、取消、Provider/model/session/workspace选择、系统提示与启用 Tool/Skill 配置卡、模型与工具卡、可展开工具结果、Token/TPS、`使用量 / 上限`、耗时、1M 上下文占用和精确失败原因。任务级授权只复用人工审批，不绕过 Policy 硬拒绝、工作区 revision 或 Sandbox。Web
-UI 还可选择 Session 路径、Git 工作区或严格对账模式，并展示 revision 策略与忽略目录。它仍是单任务控制器，不包含 durable
-Inbox、多会话并发或长期 Memory。
+- `web-server.ts`：HTTP 路由、SSE 编码、审批/取消端点和回环服务创建。
+- `web-run-manager.ts`：单活动任务状态机、订阅队列、审批等待和取消协调。
+- `web-event-projection.ts`：把已提交的 `AgentEvent` 投影为时间线、模型/工具卡与指标。
+- `web-page.ts`：无外部前端构建链的内嵌页面。
+- `main.ts`：读取端口并启动/关闭服务。
 
-指标来自 required
-SessionSink 提交成功后的 best-effort 投影。当前事件协议没有首 token 时间，因此页面的 TPS 是 Provider 输出 token 除以整轮模型请求耗时，不冒充纯 decode
-TPS。页面只展示 Provider 通过协议明确返回的推理字段；Provider 没有返回时不会伪造。
+事件先通过 required Session
+sink 成功提交，再进入 Web 的 best-effort 投影；因此页面不会把未持久化事件显示成事实。API
+Key 只保留在输入框、单次 loopback 请求和当前服务进程内。
+
+当前 `WebRunManager`
+只允许一个活动任务。审批提供“允许一次、任务内允许同名工具、拒绝”，但任务级授权仍受 Permission 硬拒绝、workspace
+revision 与 Sandbox 约束。

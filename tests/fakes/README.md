@@ -1,8 +1,11 @@
 # Fakes
 
-- **职责**：保存实现 Core Port 的可脚本化、可计数、可取消测试替身。
-- **非职责**：不复制真实 Provider、Dispatcher、Policy、Sandbox 或 Storage。
-- **允许依赖**：Core Port 与 tests 内显式 gate。
-- **禁止依赖**：真实 Adapter、网络、真实 sleep 和生产工作区。
-- **负责里程碑**：M1-06
-- **当前状态**：FakeModelClient、FakeToolExecutor、EventCollector、ControllableGate 已实现并通过单元测试。
+Fakes 是实现 Core Port 的可脚本化测试替身：
+
+- `FakeModelClient`：按请求返回预设流并记录调用。
+- `FakeToolExecutor`：返回预设结果并记录 ToolCall。
+- `EventCollector`：收集 required/best-effort 事件。
+- `ControllableGate`：让测试在确定位置暂停、释放或取消。
+
+`test-fakes.ts`
+提供统一导出。Fake 不复制 Provider、Dispatcher、Policy、Sandbox 或 Storage 的内部实现，也不使用真实网络、sleep 或用户 workspace。

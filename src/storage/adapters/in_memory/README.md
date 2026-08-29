@@ -1,8 +1,7 @@
-# In-memory Store
+# In-memory Stores
 
-- **职责**：提供确定性的 Store Port 测试/进程内实现。
-- **非职责**：不提供跨进程持久化保证。
-- **允许依赖**：Session/Checkpoint Store Port。
-- **禁止依赖**：Core Runtime 内部。
-- **负责里程碑**：M4
-- **当前状态**：M4 已实现 SessionStorePort 与 CheckpointStorePort 的严格内存适配器，覆盖 revision、position、分页、幂等和 checksum 语义。
+`InMemoryStores` 同时实现 `SessionStorePort` 与
+`CheckpointStorePort`。Session 元数据、记录和 Checkpoint 保存在进程内集合中，每次输入/输出都经过 schema 校验和复制。
+
+实现支持连续 position、revision 冲突、相同 eventId 幂等、分页读取与 checkpoint
+checksum，行为与 SQLite Adapter 对齐。它适合单元/集成测试或短生命周期嵌入，不提供跨进程持久化。

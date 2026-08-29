@@ -1,8 +1,9 @@
 # Context Selection Policy
 
-- **职责**：决定上下文条目的优先级、可见性与预算内选择。
-- **非职责**：不执行权限授权或 OS 隔离。
-- **允许依赖**：Context types。
-- **禁止依赖**：具体 Provider 和 Tool。
-- **负责里程碑**：M2
-- **当前状态**：M2 已实现并验证 token 估算、稳定裁剪顺序、transcript 成组保护和 Hook 修改后的预算复核。
+`context-selection-policy.ts` 在模型上下文窗口内选择 transcript、fragment、Skill 与 Memory。
+`CharacterTokenEstimator` 提供确定性近似估算，`selectContext()` 返回选择结果和预算统计。
+
+选择策略优先保护系统提示、当前用户消息和完整的 ToolCall/ToolResult 组，再按类型、优先级与稳定 ID 裁剪可选上下文。Hook 修改
+`ModelRequest` 后，Runtime 会再次复核预算。
+
+本模块只做可重复的资源分配，不生成摘要、不授予权限，也不依赖具体模型厂商。

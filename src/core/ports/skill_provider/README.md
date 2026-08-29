@@ -1,35 +1,7 @@
 # Skill Provider Port
 
-```yaml
-implementation: IMPLEMENTED
-scope: M5
-current_stage: M6_ACCEPTANCE
-updated: 2026-08-27
-```
+`skill-provider-port.ts` 定义按显式 ID 选择 `SkillContext` 的可取消接口。请求和返回值都经过 strict
+schema，结果必须稳定排序并保留来源。
 
-## 职责与边界
-
-定义外层 Skill 系统向 Core 提供 SkillContext 的窄端口。
-
-SkillContext 值仍由 core/context/types 拥有；Port 不定义文件格式、目录扫描、工具执行或权限提升。
-
-## 当前状态
-
-已实现受 AbortSignal 控制的显式选择契约、结果校验、稳定排序和错误分类。
-
-## 已实现
-
-- 定义受 AbortSignal 控制的查询/选择输入与返回值。
-- 返回已校验、带来源和稳定标识的 SkillContext。
-- 定义最小错误分类，避免 Loader 错误泄漏到 Runtime。
-
-## 前置条件
-
-- 与 Skill Loader、Registry 和固定 resources/skills fixture 一起设计。
-- 保持 ContextBuilder 只接收值，不主动调用 Provider。
-
-## 验收条件
-
-- Fake 与固定资源实现通过同一 contract。
-- Skill 接入不修改 RuntimeRunner 或 ContextBuilder 协议。
-- Skill 不能授予 Permission 或绕过 ToolDispatcher。
+Port 不定义资源文件格式、目录扫描或工具执行。Skill 只能作为 Context 数据，不能授予 Permission；当前实现由
+`FileSkillLoader` 加载，再由 `SkillRegistry` 提供选择。

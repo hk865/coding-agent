@@ -1,8 +1,11 @@
 # End-to-end Tests
 
-- **职责**：验证从 App 输入到可观察结果的完整用户路径。
-- **非职责**：M0 不提供 E2E 能力。
-- **允许依赖**：已装配应用。
-- **禁止依赖**：未授权外部副作用。
-- **负责里程碑**：M5 起
-- **当前状态**：M0 目录骨架；除测试 helper 外尚无业务实现。
+E2E 从进程边界验证完整装配：
+
+- `m3-bwrap-runtime.test.ts`：真实 namespace/network、隐藏资源、超时、取消、孤儿和截断。
+- `m4-cross-process.test.ts` / `m4-stable-cross-process.test.ts`：SQLite、Checkpoint 与跨进程恢复。
+- `m5-cli-child.test.ts`：CLI 子进程、PTY 审批、SIGINT 和工具闭环。
+
+普通套件在隔离能力缺失时可明确 skip；`npm run test:e2e:bwrap`
+把 bubblewrap 设为强制门禁。测试只使用临时 workspace 和离线 Provider
+fixture，不接触用户目录或真实账号。

@@ -1,8 +1,7 @@
 # Edit Tool
 
-- **职责**：在审批和 workspace 边界内执行可审计编辑。
-- **非职责**：不执行 shell 命令。
-- **允许依赖**：Tool schema、Permission、Approval、Sandbox workspace。
-- **禁止依赖**：Core Runtime。
-- **负责里程碑**：M3
-- **当前状态**：M3 已实现 write/replace/delete/patch 编辑模式，所有文件副作用经 WorkspaceSandbox 执行并返回可审计 effects。
+`EditToolHandler` 将 write、replace、delete 和 patch 参数映射到
+`WorkspaceSandbox`。输入通过模式判别 schema 校验，操作摘要提供路径供 Permission 与审批指纹使用。
+
+所有文件副作用由 WorkspaceSandbox 执行，并返回 changedPaths 与 workspace
+revision。并发内容/身份变化、路径逃逸和非法 patch 映射为稳定 ToolError；本工具不执行 shell。

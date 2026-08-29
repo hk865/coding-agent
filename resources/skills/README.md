@@ -1,36 +1,15 @@
 # Skill Resources
 
-```yaml
-implementation: IMPLEMENTED
-scope: M5
-current_stage: M6_ACCEPTANCE
-updated: 2026-08-27
+本目录是生产 Skill 的只读资源根。每个 Skill 使用一个子目录，包含：
+
+```text
+<skill-id>/
+├── skill.json   # schemaVersion、id、kind、source、priority、contentFile
+└── content.md   # 注入 Context 的正文
 ```
 
-## 职责与边界
+当前内置 `coding-safety`（instruction）和 `project-conventions`（reference）。 `FileSkillLoader`
+校验普通文件、路径 containment、大小、manifest schema、重复 ID 和内容摘要，再把结果注册到
+`SkillRegistry`；Composition 只选择配置中显式启用的 ID。
 
-保存 M5 最小 SkillProvider 使用的固定、只读 Skill fixture。
-
-Skill 内容只是待选择的 instruction 或 reference data，不能直接执行工具、修改权限或访问任意文件。
-
-## 当前状态
-
-当前提供并默认启用两个固定 Skill：`coding-safety` instruction 与 `project-conventions`
-reference。FileSkillLoader 校验 manifest、普通文件、大小、ID 和内容摘要后再注入 ContextBuilder。
-
-## M5 计划
-
-- 提供少量固定 Skill fixture，覆盖 instruction 与 reference 两种 Context 类型。
-- 为资源定义稳定标识、来源、优先级和版本。
-- 只允许 Skill Loader 从明确配置的资源根读取。
-
-## 前置条件
-
-- SkillProviderPort、Skill Loader 和 Skill Registry 的窄接口在 M5 一起冻结。
-- ContextBuilder 继续只接收已选择的 SkillContext 值。
-
-## 验收条件
-
-- fixture 可被确定性发现、解析和排序。
-- 非法、重复或越界资源会被拒绝。
-- Skill 接入不需要修改 RuntimeRunner。
+Skill 是模型上下文数据，不是代码或权限。正文中的指令不能跳过 ToolDispatcher、提升 Permission 或访问资源根之外的文件。

@@ -1,29 +1,26 @@
 # Benchmarks
 
-M6 可重复评测入口，分离任务、执行器、schema 与单次结果：
+Benchmark 子系统在隔离 workspace 中执行版本化 coding
+task，并用 Agent 不可见的 evaluator 生成结构化成绩。它可以调用产品 Composition，但生产 App/Core 不依赖 Benchmark。
 
-- `tasks/`：4 个版本化 MVP canary；
-- `harness/`：Provider smoke、base/oracle/near-miss 预检与真实/replay baseline；
-- `schemas/`：Provider smoke、任务、trial 和 run summary 的 strict schema；
-- `results/`：运行产物，默认不提交，只保留格式说明。
+```text
+Task Package → Harness → isolated workspace → Agent/Replay
+                                      │
+                               hidden evaluator
+                                      │
+                       result + trace + diff + logs
+```
 
-运行任务预检：
+- `tasks/`：task metadata、用户 instruction、base/oracle/near-miss 和 hidden evaluator。
+- `harness/`：preflight、单 trial 执行、真实 Agent/Replay 与汇总。
+- `schemas/`：任务、trial、run summary 和 Provider smoke 的 strict schema。
+- `results/`：默认不提交的运行产物格式。
 
 ```bash
 npm run benchmark:validate
-```
-
-运行一次确定性 replay baseline：
-
-```bash
 npm run benchmark:baseline:replay
+npm run benchmark:baseline:real -- --provider <openai|deepseek> --model <model-id>
 ```
 
-运行一次低预算真实 Provider smoke（同时验证文本和不执行的 ToolCall）：
-
-```bash
-npm run smoke:providers -- --provider <openai|deepseek> --model <model-id>
-```
-
-Replay 只验证 harness 和 evaluator，不计为真实模型能力基线。真实模型运行必须使用可追溯 commit、支持 bubblewrap 的 runner、固定 Provider/model/预算，并由
-`agent-runner.mjs` 通过产品 Composition 执行。
+Replay 只验证 Harness/evaluator。真实模型基线必须绑定干净且可追溯的 Git
+commit、固定 Provider/model/预算和可用的 bubblewrap 环境。

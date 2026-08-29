@@ -1,8 +1,10 @@
 # Sandbox
 
-- **职责**：强制 workspace 和 process 的执行边界。
-- **非职责**：不做业务授权，也不能只靠字符串路径检查冒充 OS sandbox。
-- **允许依赖**：平台隔离能力和 Policy 决策结果。
-- **禁止依赖**：Core Runtime。
-- **负责里程碑**：M3
-- **当前状态**：M3 已实现 WorkspaceSandbox 与 ProcessSandbox；当前环境缺少 bubblewrap，因此真实进程隔离 E2E 仍受环境限制并保持 fail-closed。
+Sandbox 层强制执行文件与进程边界，是 Permission 之后的独立安全层。
+
+- `workspace/`：以打开的 workspace 目录为锚，提供 symlink-safe 文件操作、一致性基线和 Git/fallback
+  revision。
+- `process/`：使用 Linux bubblewrap 建立挂载、环境与网络隔离，并管理进程树。
+
+Permission 回答“是否允许”，Sandbox 回答“即使上层出错，操作最多能触及哪里”。隔离能力缺失时进程工具 fail
+closed，不退化为普通子进程。

@@ -1,9 +1,8 @@
-# check tool
+# Check Tool
 
-check 对账 Agent 内存中的变更基线：
+`check` 显式对账 Agent 维护的 workspace 基线，不修改文件。
 
-- session 只复核本次运行已读/已改/命令影响过的路径；
-- workspace 使用 Git porcelain 主线；非 Git 目录回退到稀疏元数据快照；
-- 工具只报告漂移并推进观察基线，不修改工作区文件。
+- `scope=session`：只复核本次运行已观察或影响过的路径。
+- `scope=workspace`：Git 目录使用受限 porcelain；非 Git 目录使用稀疏元数据快照。
 
-路径能力和敏感资源拒绝仍由 WorkspaceSandbox 与 PermissionPolicy 强制。
+结果包含模式、scope、状态、检查路径、变化路径、revision 和策略，并推进“已观察”基线。strict 一致性模式还会在风险操作审批前调用同一对账能力。

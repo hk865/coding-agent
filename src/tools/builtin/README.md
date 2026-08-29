@@ -1,4 +1,13 @@
 # Built-in Tools
 
-内置 Coding
-Tool 的实现容器。所有工具必须由 Dispatcher 经过权限、审批和 Sandbox 强制链调用，不能提供绕过 Dispatcher 的执行入口。M3 负责实现。
+内置工具由 Composition 创建并注册为 `ToolDefinition`：
+
+| 工具    | effect class      | 底层能力             |
+| ------- | ----------------- | -------------------- |
+| `read`  | `read_only`       | `WorkspaceSandbox`   |
+| `check` | `read_only`       | workspace 一致性基线 |
+| `edit`  | `workspace_write` | `WorkspaceSandbox`   |
+| `shell` | `process`         | `ProcessSandbox`     |
+
+每个定义包含 Zod 输入、操作摘要、所需 Sandbox
+capability、超时、输出上限和 handler。调用始终由 Dispatcher 统一校验与授权。

@@ -1,8 +1,10 @@
 # Tool Registry
 
-- **职责**：保存工具声明并按名称解析具体实现。
-- **非职责**：不执行工具或做权限决策。
-- **允许依赖**：工具实现侧声明。
-- **禁止依赖**：Core Runtime。
-- **负责里程碑**：M3
-- **当前状态**：M3 已实现 ToolDefinition 注册、重复检测、不可变快照、模型规格导出和并行安全分组。
+`ToolRegistry` 注册并校验 `ToolDefinition`，拒绝重复名称；`freeze(enabledNames)` 生成不可变
+`ToolRegistrySnapshot`，之后不允许继续注册。
+
+Snapshot 按名称导出 Provider 可用的 `ModelToolSpec`，并把 Zod JSON
+schema 归一为跨 Provider 保守子集；运行时参数仍使用原始 Zod schema。
+
+`RegistryToolBatchPolicy` 仅在整个批次都是 `independentReadOnly`
+时并行，否则按模型顺序串行。Registry 不执行工具或做权限判断。
